@@ -79,6 +79,11 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "update_email") {
+      if (callerProfile?.role !== "super_admin") {
+        return new Response(JSON.stringify({ error: "Forbidden: SuperAdmin only" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       if (!email || !email.includes("@")) {
         return new Response(JSON.stringify({ error: "Valid email required" }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },

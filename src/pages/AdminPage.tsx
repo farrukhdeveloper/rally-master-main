@@ -1522,7 +1522,7 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
   }
 
   async function handleUpdateEmail() {
-    if (modal.type !== 'email') return;
+    if (modal.type !== 'email' || !isSuperAdmin) return;
     setModalLoading(true);
     setModalError('');
     try {
@@ -1569,6 +1569,7 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
   }
 
   function openEmailModal(player: Profile) {
+    if (!isSuperAdmin) return;
     setNewEmail('');
     setModalError('');
     setModal({ type: 'email', player });
@@ -1828,9 +1829,9 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
                       <button onClick={() => { setEditId(player.id); setEditForm({ full_name: player.full_name, skill_level: player.skill_level, phone: player.phone, role: player.role }); }} className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all" title="Edit name / phone / skill">
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
-                      <button onClick={() => openEmailModal(player)} className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all" title="Change email address">
+                      {isSuperAdmin && <button onClick={() => openEmailModal(player)} className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all" title="Change email address">
                         <Mail className="w-3.5 h-3.5" />
-                      </button>
+                      </button>}
                       <button onClick={() => openResetModal(player)} className="p-2 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all" title="Send password reset link">
                         <KeyRound className="w-3.5 h-3.5" />
                       </button>
@@ -1857,7 +1858,7 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
       )}
 
       {/* Change Email Modal */}
-      {modal.type === 'email' && (
+      {modal.type === 'email' && isSuperAdmin && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-4">

@@ -13,6 +13,7 @@ import HelpPage from './pages/HelpPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import RotationPlannerPage from './pages/RotationPlannerPage';
 import GroupChallengesPage from './pages/GroupChallengesPage';
+import ProfilePage from './pages/ProfilePage';
 import { Environment } from './lib/supabase';
 import { Feather } from 'lucide-react';
 
@@ -51,6 +52,7 @@ function AppContent() {
       leaderboard: <LeaderboardPage envFilter={pageEnvFilter} />,
       history: <HistoryPage envFilter={pageEnvFilter} />,
       help: <HelpPage />,
+      profile: <ProfilePage />,
       admin: <AdminPage tab={adminSubPage} />,
     };
 

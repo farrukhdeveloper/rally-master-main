@@ -4,10 +4,10 @@ import { Environment } from '../lib/supabase';
 import { skillLevelColor, skillLevelLabel } from '../lib/skillLevels';
 import {
   Feather, LayoutDashboard, Calendar, Monitor, BarChart2, PlayCircle,
-  LogOut, Menu, X, Shield, ChevronRight, History, HelpCircle, Shuffle, Swords
+  LogOut, Menu, X, Shield, ChevronRight, History, HelpCircle, Shuffle, Swords, UserRound
 } from 'lucide-react';
 
-export type Page = 'dashboard' | 'sessions' | 'courts' | 'matches' | 'planner' | 'challenges' | 'leaderboard' | 'admin' | 'history' | 'help';
+export type Page = 'dashboard' | 'sessions' | 'courts' | 'matches' | 'planner' | 'challenges' | 'leaderboard' | 'admin' | 'history' | 'help' | 'profile';
 export type AdminSubPage = 'sessions' | 'groups' | 'players' | 'rankings' | 'whatsapp' | 'settings';
 
 interface LayoutProps {
@@ -30,6 +30,7 @@ const NAV_ITEMS: { id: Page; label: string; icon: React.FC<any>; adminOnly?: boo
   { id: 'leaderboard', label: 'Leaderboard', icon: BarChart2 },
   { id: 'history', label: 'My History', icon: History },
   { id: 'help', label: 'Help & Features', icon: HelpCircle },
+  { id: 'profile', label: 'My Profile', icon: UserRound },
   { id: 'admin', label: 'Admin Panel', icon: Shield, adminOnly: true },
 ];
 

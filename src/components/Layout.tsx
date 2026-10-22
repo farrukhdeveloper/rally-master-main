@@ -1,4 +1,4 @@
-﻿import { ReactNode, useState } from 'react';
+import { ReactNode, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Environment } from '../lib/supabase';
 import { skillLevelColor, skillLevelLabel } from '../lib/skillLevels';

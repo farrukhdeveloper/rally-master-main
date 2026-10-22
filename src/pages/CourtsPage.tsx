@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase, Match, Court, Session, Profile, MatchTeamWithPlayers, Environment } from '../lib/supabase';
 import { skillLevelColor, skillLevelLabel, skillLevelTextColor } from '../lib/skillLevels';
 import { useAuth } from '../context/AuthContext';

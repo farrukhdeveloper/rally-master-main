@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase, Profile, Environment, SkillLevel, Group } from '../lib/supabase';
 import { SKILL_LEVELS, normalizeSkillLevel, skillLevelColor, skillLevelLabel } from '../lib/skillLevels';
 import { calculatePlayerRatingsFromMatches } from '../lib/rating';

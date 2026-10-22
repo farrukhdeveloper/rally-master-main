@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase, PlayerMatchHistory, TeamLabel, Environment } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { History, Trophy, XCircle, Minus, MapPin, Calendar, User, Clock, Users } from 'lucide-react';

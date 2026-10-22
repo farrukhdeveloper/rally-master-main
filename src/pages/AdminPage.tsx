@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase, supabaseAdmin, Session, Court, Profile, SkillLevel, Environment, Group, PlayerGroup } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { AdminSubPage } from '../components/Layout';

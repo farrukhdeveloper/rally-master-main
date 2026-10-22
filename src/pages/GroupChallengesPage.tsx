@@ -29,7 +29,7 @@ interface ChallengeDetails extends Competition {
 
 const emptyForm = {
   title: '', teamAName: '', teamBName: '', eventDate: '', startTime: '18:00', venue: '',
-  courtCount: 2, fixtureMinutes: 10, countsForRankings: false,
+  courtCount: 2, fixtureMinutes: 10, countsForRankings: true,
 };
 
 const emptyExtraForm = {
@@ -171,7 +171,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
       competition_type: 'group_challenge', title: form.title.trim() || `${teamAName} vs ${teamBName}`, environment: envFilter,
       event_date: form.eventDate, start_time: form.startTime, venue: form.venue.trim(),
       court_count: form.courtCount, fixture_minutes: form.fixtureMinutes,
-      counts_for_rankings: form.countsForRankings, status: 'scheduled', created_by: user.id,
+      counts_for_rankings: true, status: 'scheduled', created_by: user.id,
     }).select().single();
     if (competitionError || !competition) { setError(competitionError?.message || 'Could not create challenge.'); setSaving(false); return; }
 
@@ -239,6 +239,49 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
     });
     return summary;
   }, [selected]);
+
+  const playerResults = useMemo(() => {
+    if (!selected) return [];
+    const rows = new Map<string, { id: string; name: string; side: TeamLabel; seed: number; played: number; wins: number; pointsFor: number; pointsAgainst: number; partners: Map<string, { name: string; played: number; wins: number }> }>();
+    const sideById = new Map(selected.groups.map((side) => [side.id, side.side]));
+    selected.rosters.forEach((roster) => rows.set(roster.player_id, {
+      id: roster.player_id, name: playerName(roster.profile), side: sideById.get(roster.competition_group_id) || 'A',
+      seed: roster.seed_number, played: 0, wins: 0, pointsFor: 0, pointsAgainst: 0, partners: new Map(),
+    }));
+    selected.fixtures.filter((fixture) => fixture.status === 'completed').forEach((fixture) => {
+      (['A', 'B'] as TeamLabel[]).forEach((side) => {
+        const players = (fixture.players || []).filter((player) => player.side === side);
+        players.forEach((player) => {
+          const row = rows.get(player.player_id);
+          if (!row) return;
+          row.played++;
+          if (fixture.winner_side === side) row.wins++;
+          row.pointsFor += (side === 'A' ? fixture.score_a : fixture.score_b) || 0;
+          row.pointsAgainst += (side === 'A' ? fixture.score_b : fixture.score_a) || 0;
+          players.filter((partner) => partner.player_id !== player.player_id).forEach((partner) => {
+            const pair = row.partners.get(partner.player_id) || { name: playerName(partner.profile), played: 0, wins: 0 };
+            pair.played++;
+            if (fixture.winner_side === side) pair.wins++;
+            row.partners.set(partner.player_id, pair);
+          });
+        });
+      });
+    });
+    return [...rows.values()].sort((a, b) => b.wins - a.wins || (b.pointsFor - b.pointsAgainst) - (a.pointsFor - a.pointsAgainst) || b.played - a.played || a.seed - b.seed);
+  }, [selected]);
+
+  const roundResults = useMemo(() => {
+    const rounds = new Map<number, { round: number; winsA: number; winsB: number }>();
+    selected?.fixtures.filter((fixture) => fixture.status === 'completed').forEach((fixture) => {
+      const row = rounds.get(fixture.round_number) || { round: fixture.round_number, winsA: 0, winsB: 0 };
+      if (fixture.winner_side === 'A') row.winsA++;
+      if (fixture.winner_side === 'B') row.winsB++;
+      rounds.set(fixture.round_number, row);
+    });
+    return [...rounds.values()].sort((a, b) => a.round - b.round);
+  }, [selected]);
+  const topPerformer = playerResults.filter((player) => player.played >= 3)
+    .sort((a, b) => b.wins / b.played - a.wins / a.played || (b.pointsFor - b.pointsAgainst) - (a.pointsFor - a.pointsAgainst))[0];
 
   function leaderLabel() {
     if (!selected) return '';
@@ -539,7 +582,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
             <div className="flex flex-wrap gap-2 text-xs">
               <span className="bg-sky-50 text-sky-700 px-3 py-2 rounded-lg">{preview?.totalFixtures || 0} fixtures</span><span className="bg-violet-50 text-violet-700 px-3 py-2 rounded-lg">{preview?.rounds || 0} rounds</span><span className="bg-amber-50 text-amber-700 px-3 py-2 rounded-lg">{preview?.appearancesPerPlayer || 0} games / player</span>{preview && <span className="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg">Finish {new Date(preview.estimatedFinish).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
             </div>
-            <div className="flex items-center gap-3"><label className="flex items-center gap-2 text-sm text-gray-600"><input type="checkbox" checked={form.countsForRankings} onChange={(e) => setForm({ ...form, countsForRankings: e.target.checked })} className="w-4 h-4 accent-emerald-500" />Count for rankings</label><button onClick={createChallenge} disabled={saving || !preview} className="bg-emerald-500 disabled:opacity-40 text-white px-5 py-2.5 rounded-xl text-sm font-semibold">{saving ? 'Creating...' : 'Create & Schedule'}</button></div>
+            <div className="flex items-center gap-3"><span className="text-xs text-gray-500">Completed matches count toward overall rankings.</span><button onClick={createChallenge} disabled={saving || !preview} className="bg-emerald-500 disabled:opacity-40 text-white px-5 py-2.5 rounded-xl text-sm font-semibold">{saving ? 'Creating...' : 'Create & Schedule'}</button></div>
           </div>
         </section>
       )}
@@ -560,6 +603,17 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
                 <div className="p-4 sm:p-5 bg-emerald-50 border-b border-emerald-100"><div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3"><div><div className="flex items-center gap-2 flex-wrap"><h2 className="text-xl font-bold text-gray-900">{selected.title}</h2>{isOrganiser && <span className="inline-flex items-center gap-1 bg-white border border-emerald-200 text-emerald-700 px-2 py-1 rounded-lg text-xs"><ShieldCheck className="w-3.5 h-3.5" />Organiser</span>}{!selected.counts_for_rankings && <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-lg text-xs">Exhibition</span>}</div><div className="flex flex-wrap gap-3 text-xs text-gray-500 mt-2"><span className="flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" />{selected.event_date}</span><span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{selected.start_time.slice(0, 5)}</span><span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{selected.venue}</span></div></div><div className="flex items-center gap-2 flex-wrap"><span className="bg-white border border-emerald-200 px-3 py-2 rounded-xl text-sm font-semibold text-emerald-700">{leaderLabel()}</span></div></div></div>
                 <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 p-4 sm:p-6"><div className="text-center min-w-0"><p className="font-bold text-gray-900 break-words">{sideName(selectedSideA, 'Team A')}</p><p className="text-3xl font-bold text-sky-600 mt-2">{standings.winsA}</p><p className="text-xs text-gray-400">fixture wins · {standings.pointsA - standings.pointsB >= 0 ? '+' : ''}{standings.pointsA - standings.pointsB} diff</p></div><div className="text-gray-300 font-bold">vs</div><div className="text-center min-w-0"><p className="font-bold text-gray-900 break-words">{sideName(selectedSideB, 'Team B')}</p><p className="text-3xl font-bold text-rose-600 mt-2">{standings.winsB}</p><p className="text-xs text-gray-400">fixture wins · {standings.pointsB - standings.pointsA >= 0 ? '+' : ''}{standings.pointsB - standings.pointsA} diff</p></div></div>
                 <div className="grid grid-cols-3 border-t border-gray-100 text-center text-xs"><div className="p-3"><b className="block text-gray-900 text-base">{standings.completed}</b><span className="text-gray-400">Completed</span></div><div className="p-3 border-x border-gray-100"><b className="block text-gray-900 text-base">{selected.fixtures.length - standings.completed}</b><span className="text-gray-400">Remaining</span></div><div className="p-3"><b className="block text-gray-900 text-base">{regularRoundCount}</b><span className="text-gray-400">Rounds{extraMatchCount > 0 ? ` + ${extraMatchCount} extra` : ''}</span></div></div>
+              </section>
+
+              <section className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
+                <div className="flex items-start justify-between gap-3 flex-wrap"><div><h3 className="font-bold text-gray-900">Challenge results</h3><p className="text-xs text-gray-500 mt-1">Player results include regular and extra matches. Completed matches also count toward overall rankings.</p></div>{topPerformer && <span className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs font-semibold text-amber-800">Top performer: {topPerformer.name} · {topPerformer.wins}/{topPerformer.played} wins</span>}</div>
+                <div className="grid sm:grid-cols-2 gap-3 text-sm">
+                  {(['A', 'B'] as TeamLabel[]).map((side) => <div key={side} className={`rounded-xl p-3 border ${side === 'A' ? 'bg-sky-50 border-sky-100' : 'bg-rose-50 border-rose-100'}`}><p className="font-semibold text-gray-900">{side === 'A' ? sideName(selectedSideA, 'Team A') : sideName(selectedSideB, 'Team B')}</p><p className="mt-1 text-gray-600">{side === 'A' ? standings.winsA : standings.winsB} wins · {side === 'A' ? standings.pointsA : standings.pointsB} points · {side === 'A' ? standings.pointsA - standings.pointsB : standings.pointsB - standings.pointsA} point difference</p></div>)}
+                </div>
+                {roundResults.length > 0 && <div><h4 className="text-sm font-semibold text-gray-800 mb-2">Results by round</h4><div className="flex flex-wrap gap-2">{roundResults.map((round) => <span key={round.round} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">Round {round.round}: <b className="text-sky-700">{round.winsA}</b>–<b className="text-rose-700">{round.winsB}</b></span>)}</div></div>}
+                <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-sm"><thead><tr className="border-b border-gray-200 text-xs text-gray-500"><th className="py-2 text-left">Player</th><th className="py-2 text-left">Team / seed</th><th className="py-2 text-right">Played</th><th className="py-2 text-right">W–L</th><th className="py-2 text-right">Win rate</th><th className="py-2 text-right">Points</th><th className="py-2 text-right">Difference</th></tr></thead><tbody>{playerResults.map((player) => <tr key={player.id} className="border-b border-gray-100 last:border-0"><td className="py-2.5 font-medium text-gray-900">{player.name}</td><td className="py-2.5 text-gray-600">{player.side === 'A' ? sideName(selectedSideA, 'Team A') : sideName(selectedSideB, 'Team B')} · #{player.seed}</td><td className="py-2.5 text-right tabular-nums">{player.played}</td><td className="py-2.5 text-right tabular-nums">{player.wins}–{player.played - player.wins}</td><td className="py-2.5 text-right tabular-nums">{player.played ? Math.round(player.wins / player.played * 100) : 0}%</td><td className="py-2.5 text-right tabular-nums">{player.pointsFor}–{player.pointsAgainst}</td><td className="py-2.5 text-right tabular-nums">{player.pointsFor - player.pointsAgainst >= 0 ? '+' : ''}{player.pointsFor - player.pointsAgainst}</td></tr>)}</tbody></table></div>
+                {playerResults.some((player) => player.partners.size > 0) && <details className="text-sm"><summary className="cursor-pointer font-semibold text-gray-800">Partnership results</summary><div className="grid sm:grid-cols-2 gap-2 mt-3">{playerResults.flatMap((player) => [...player.partners.entries()].filter(([id]) => player.id < id).map(([id, pair]) => <div key={`${player.id}-${id}`} className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2"><span className="font-medium text-gray-900">{player.name} + {pair.name}</span><span className="block text-xs text-gray-500">{pair.wins} wins · {pair.played - pair.wins} losses · {pair.played} played</span></div>))}</div></details>}
+                {standings.completed === 0 && <p className="text-sm text-gray-400">Enter a match result to see team and individual progress.</p>}
               </section>
 
               <div className="flex items-center justify-between gap-3 flex-wrap">

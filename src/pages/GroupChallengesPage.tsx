@@ -15,14 +15,20 @@ interface GroupWithMembers extends Group {
   members: Profile[];
 }
 
+interface PlayerChoice {
+  profile: Profile;
+  groupIds: string[];
+  groupNames: string[];
+}
+
 interface ChallengeDetails extends Competition {
-  groups: (CompetitionGroup & { group: Group })[];
+  groups: (CompetitionGroup & { group: Group | null })[];
   rosters: (CompetitionRoster & { profile: Profile })[];
   fixtures: CompetitionFixture[];
 }
 
 const emptyForm = {
-  title: '', groupA: '', groupB: '', teamAName: '', teamBName: '', eventDate: '', startTime: '18:00', venue: '',
+  title: '', teamAName: '', teamBName: '', eventDate: '', startTime: '18:00', venue: '',
   courtCount: 2, fixtureMinutes: 10, countsForRankings: false,
 };
 
@@ -31,7 +37,7 @@ const emptyExtraForm = {
   scheduledAt: '', allowRematch: false,
 };
 
-function sideName(side?: CompetitionGroup & { group?: Group }, fallback = 'Team') {
+function sideName(side?: CompetitionGroup & { group?: Group | null }, fallback = 'Team') {
   return side?.team_name?.trim() || side?.group?.name || fallback;
 }
 
@@ -115,8 +121,17 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
   useEffect(() => { loadData(); }, [loadData]);
 
   const selected = challenges.find((challenge) => challenge.id === selectedId) || null;
-  const groupA = groups.find((group) => group.id === form.groupA);
-  const groupB = groups.find((group) => group.id === form.groupB);
+  const playerChoices = useMemo(() => {
+    const choices = new Map<string, PlayerChoice>();
+    for (const group of groups) for (const profile of group.members) {
+      const choice = choices.get(profile.id) || { profile, groupIds: [], groupNames: [] };
+      choice.groupIds.push(group.id);
+      choice.groupNames.push(group.name);
+      choices.set(profile.id, choice);
+    }
+    return [...choices.values()].sort((a, b) => a.profile.full_name.localeCompare(b.profile.full_name));
+  }, [groups]);
+  const playerById = useMemo(() => new Map(playerChoices.map((choice) => [choice.profile.id, choice.profile])), [playerChoices]);
   const preview = useMemo(() => {
     if (rosterA.length < 2 || rosterA.length !== rosterB.length || !form.eventDate || !form.startTime) return null;
     return generateSeededChallengeSchedule(rosterA.length, form.courtCount, form.fixtureMinutes, form.eventDate, form.startTime);
@@ -131,32 +146,29 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
 
   async function createChallenge() {
     setError('');
-    if (!user || !form.title.trim() || !form.groupA || !form.groupB || !form.eventDate || !form.venue.trim()) {
-      setError('Complete the challenge name, groups, date, and venue.'); return;
+    if (!user || !form.teamAName.trim() || !form.teamBName.trim() || !form.eventDate || !form.venue.trim()) {
+      setError('Complete both team names, date, and venue.'); return;
     }
     if (new Set([...rosterA, ...rosterB]).size !== rosterA.length + rosterB.length) {
       setError('Each player can belong to only one side of this challenge.'); return;
     }
-    if (rosterA.some((id) => !groupA?.members.some((member) => member.id === id))
-      || rosterB.some((id) => !groupB?.members.some((member) => member.id === id))) {
-      setError('Select players from the group chosen for each side.'); return;
+    if ([...rosterA, ...rosterB].some((id) => !playerById.has(id))) {
+      setError('Select players from the available groups.'); return;
     }
     if (rosterA.length < 2 || rosterA.length !== rosterB.length) {
-      setError('Both groups need the same number of seeded players, with at least two per group.'); return;
+      setError('Both teams need the same number of seeded players, with at least two per team.'); return;
     }
     if (!preview) return;
-    const ownsEitherGroup = isSuperAdmin || groupA?.created_by === user.id || groupB?.created_by === user.id;
-    if (!ownsEitherGroup) { setError('Only a participating group owner or super admin can create this challenge.'); return; }
+    if (!isAdmin) { setError('Only an organiser or super admin can create a challenge.'); return; }
 
-    const sameGroup = form.groupA === form.groupB;
-    const teamAName = form.teamAName.trim() || `${groupA?.name || 'Team'}${sameGroup ? ' A' : ''}`;
-    const teamBName = form.teamBName.trim() || `${groupB?.name || 'Team'}${sameGroup ? ' B' : ''}`;
+    const teamAName = form.teamAName.trim();
+    const teamBName = form.teamBName.trim();
     if (teamAName.toLowerCase() === teamBName.toLowerCase()) {
       setError('Give the two sides different team names.'); return;
     }
     setSaving(true);
     const { data: competition, error: competitionError } = await supabase.from('competitions').insert({
-      competition_type: 'group_challenge', title: form.title.trim(), environment: envFilter,
+      competition_type: 'group_challenge', title: form.title.trim() || `${teamAName} vs ${teamBName}`, environment: envFilter,
       event_date: form.eventDate, start_time: form.startTime, venue: form.venue.trim(),
       court_count: form.courtCount, fixture_minutes: form.fixtureMinutes,
       counts_for_rankings: form.countsForRankings, status: 'scheduled', created_by: user.id,
@@ -165,8 +177,8 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
 
     try {
       const { data: sides, error: sideError } = await supabase.from('competition_groups').insert([
-        { competition_id: competition.id, group_id: form.groupA, side: 'A', team_name: teamAName },
-        { competition_id: competition.id, group_id: form.groupB, side: 'B', team_name: teamBName },
+        { competition_id: competition.id, group_id: null, side: 'A', team_name: teamAName },
+        { competition_id: competition.id, group_id: null, side: 'B', team_name: teamBName },
       ]).select();
       if (sideError || !sides || sides.length !== 2) throw sideError || new Error('Could not save challenge groups.');
       const sideAId = sides.find((row: any) => row.side === 'A')!.id;
@@ -493,7 +505,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-5">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div><h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><Swords className="w-6 h-6 text-emerald-600" />Group Challenges</h1><p className="text-sm text-gray-500 mt-1">Seeded doubles challenges with live group standings.</p></div>
+        <div><h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><Swords className="w-6 h-6 text-emerald-600" />Group Challenges</h1><p className="text-sm text-gray-500 mt-1">Seeded team challenges with live standings.</p></div>
         {isAdmin && <button onClick={() => { setShowCreate(true); setError(''); }} className="inline-flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white px-4 py-2.5 rounded-xl text-sm font-semibold"><Plus className="w-4 h-4" />New Challenge</button>}
       </header>
 
@@ -501,9 +513,9 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
 
       {showCreate && (
         <section className="bg-white border border-emerald-200 rounded-2xl p-4 sm:p-5 space-y-5">
-          <div className="flex items-center justify-between"><div><h2 className="font-bold text-gray-900">Create Seeded Challenge</h2><p className="text-xs text-gray-500 mt-1">Choose one group for both sides or two different groups. Selection order sets seeds: first selected is #1. Partners rotate against the matching seeds on the other side.</p></div><button onClick={() => setShowCreate(false)} className="p-2 text-gray-400 hover:text-gray-800"><X className="w-5 h-5" /></button></div>
+          <div className="flex items-center justify-between"><div><h2 className="font-bold text-gray-900">Create Seeded Challenge</h2><p className="text-xs text-gray-500 mt-1">Name your teams and add players from any group. Selection order sets seeds; partners rotate against matching seeds on the other team.</p></div><button onClick={() => setShowCreate(false)} className="p-2 text-gray-400 hover:text-gray-800"><X className="w-5 h-5" /></button></div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Challenge name" className="lg:col-span-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
+            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Challenge name (optional)" className="lg:col-span-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
             <input type="date" value={form.eventDate} onChange={(e) => setForm({ ...form, eventDate: e.target.value })} className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
             <input type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
             <input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} placeholder="Venue" className="lg:col-span-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
@@ -511,14 +523,14 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
             <label className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-500">Minutes / fixture<input type="number" min="1" value={form.fixtureMinutes} onChange={(e) => setForm({ ...form, fixtureMinutes: Math.max(1, Number(e.target.value)) })} className="block w-full bg-transparent text-gray-900 text-sm focus:outline-none" /></label>
           </div>
           <div className="grid lg:grid-cols-2 gap-4">
-            <RosterEditor side="A" groups={groups} selectedGroup={form.groupA} onGroup={(value) => { setForm({ ...form, groupA: value }); setRosterA([]); }} roster={rosterA} group={groupA} onToggle={(id) => toggleRoster('A', id)} otherRoster={rosterB} teamName={form.teamAName} onTeamName={(value) => setForm({ ...form, teamAName: value })} />
-            <RosterEditor side="B" groups={groups} selectedGroup={form.groupB} onGroup={(value) => { setForm({ ...form, groupB: value }); setRosterB([]); }} roster={rosterB} group={groupB} onToggle={(id) => toggleRoster('B', id)} otherRoster={rosterA} teamName={form.teamBName} onTeamName={(value) => setForm({ ...form, teamBName: value })} />
+            <TeamRosterEditor side="A" groups={groups} players={playerChoices} roster={rosterA} onToggle={(id) => toggleRoster('A', id)} otherRoster={rosterB} teamName={form.teamAName} onTeamName={(value) => setForm({ ...form, teamAName: value })} />
+            <TeamRosterEditor side="B" groups={groups} players={playerChoices} roster={rosterB} onToggle={(id) => toggleRoster('B', id)} otherRoster={rosterA} teamName={form.teamBName} onTeamName={(value) => setForm({ ...form, teamBName: value })} />
           </div>
           {rosterA.length > 0 && rosterB.length > 0 && (
             <div className="rounded-xl border border-gray-200 p-3 space-y-1 text-xs text-gray-600">
-              <p className="font-semibold text-gray-900">Matching seeds across the two sides</p>
+              <p className="font-semibold text-gray-900">Matching seeds: {form.teamAName.trim() || 'Team 1'} vs {form.teamBName.trim() || 'Team 2'}</p>
               {Array.from({ length: Math.max(rosterA.length, rosterB.length) }, (_, index) => (
-                <p key={index}>#{index + 1}: {playerName(groupA?.members.find((member) => member.id === rosterA[index]))} vs {playerName(groupB?.members.find((member) => member.id === rosterB[index]))}</p>
+                <p key={index}>#{index + 1}: {playerName(playerById.get(rosterA[index]))} vs {playerName(playerById.get(rosterB[index]))}</p>
               ))}
               <p className="text-gray-400">Example: seeds #1 + #2 on side A play seeds #1 + #2 on side B. Remove and reselect a player to change their seed.</p>
             </div>
@@ -587,40 +599,64 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
   );
 }
 
-function RosterEditor({ side, groups, selectedGroup, onGroup, roster, group, onToggle, otherRoster, teamName, onTeamName }: {
-  side: TeamLabel; groups: GroupWithMembers[]; selectedGroup: string; onGroup: (value: string) => void;
-  roster: string[]; group?: GroupWithMembers; onToggle: (id: string) => void; otherRoster: string[];
-  teamName: string; onTeamName: (value: string) => void;
+function TeamRosterEditor({ side, groups, players, roster, onToggle, otherRoster, teamName, onTeamName }: {
+  side: TeamLabel; groups: GroupWithMembers[]; players: PlayerChoice[]; roster: string[];
+  onToggle: (id: string) => void; otherRoster: string[]; teamName: string; onTeamName: (value: string) => void;
 }) {
+  const [showPicker, setShowPicker] = useState(false);
+  const [search, setSearch] = useState('');
+  const [groupFilter, setGroupFilter] = useState('');
+  const label = teamName.trim() || (side === 'A' ? 'Team 1' : 'Team 2');
+  const playerById = new Map(players.map((choice) => [choice.profile.id, choice.profile]));
+  const visiblePlayers = players.filter((choice) => !otherRoster.includes(choice.profile.id)
+    && (!groupFilter || choice.groupIds.includes(groupFilter))
+    && `${choice.profile.full_name} ${choice.groupNames.join(' ')}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+
   return (
     <div className={`border rounded-2xl p-4 ${side === 'A' ? 'border-sky-200 bg-sky-50' : 'border-rose-200 bg-rose-50'}`}>
-      <label className="text-xs font-semibold text-gray-500" htmlFor={`challenge-group-${side}`}>Source group for side {side}</label>
-      <select id={`challenge-group-${side}`} value={selectedGroup} onChange={(event) => onGroup(event.target.value)} className="w-full mt-1 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm">
-        <option value="">Select group</option>
-        {groups.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-      </select>
-      <label className="block text-xs font-semibold text-gray-500 mt-3" htmlFor={`challenge-team-${side}`}>Team {side} name (optional)</label>
-      <input id={`challenge-team-${side}`} value={teamName} onChange={(event) => onTeamName(event.target.value)} placeholder={side === 'A' ? 'e.g. Smashers' : 'e.g. Strikers'} className="w-full mt-1 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
-      <p className="text-xs text-gray-500 mt-2">Selection order sets seeds on this side. Players selected on the other side are unavailable.</p>
-      {roster.length > 0 && <div className="space-y-1.5 mt-3">{roster.map((id, index) => {
-        const profile = group?.members.find((member) => member.id === id);
-        return <div key={id} className="bg-white border border-gray-100 rounded-xl p-2 flex items-center gap-2">
-          <span className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold">#{index + 1}</span>
-          <span className="flex-1 text-sm font-medium text-gray-900 break-words">{playerName(profile)}</span>
-          <button onClick={() => onToggle(id)} aria-label={`Remove ${playerName(profile)} from side ${side}`} className="p-1 text-red-400"><X className="w-4 h-4" /></button>
-        </div>;
-      })}</div>}
-      <div className="mt-3">
-        <p className="text-xs font-semibold text-gray-400 mb-2">AVAILABLE GROUP MEMBERS</p>
-        <div className="grid sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
-          {group?.members.filter((member) => !roster.includes(member.id) && !otherRoster.includes(member.id)).map((member) => (
-            <button key={member.id} onClick={() => onToggle(member.id)} className="text-left bg-white border border-gray-100 rounded-lg px-2.5 py-2 text-xs hover:border-emerald-300">
-              <span className="block font-medium text-gray-800 break-words">{member.full_name}</span>
-              <span className={`inline-block mt-1 px-1.5 py-0.5 rounded ${skillLevelColor(member.skill_level)}`}>{skillLevelLabel(member.skill_level)}</span>
-            </button>
-          ))}
-        </div>
+      <label className="block text-xs font-semibold text-gray-500" htmlFor={`challenge-team-${side}`}>{side === 'A' ? 'First team name' : 'Second team name'}</label>
+      <input id={`challenge-team-${side}`} value={teamName} onChange={(event) => onTeamName(event.target.value)} placeholder={side === 'A' ? 'e.g. Strikers' : 'e.g. Smashers'} className="w-full mt-1 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
+      <div className="flex items-center justify-between gap-2 mt-4">
+        <p className="text-sm font-semibold text-gray-800">{roster.length} players selected</p>
+        <button type="button" onClick={() => setShowPicker(true)} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-white border border-gray-200 text-emerald-700 text-sm font-semibold"><Plus className="w-4 h-4" />Add players</button>
       </div>
+      <p className="text-xs text-gray-500 mt-2">First selected is seed #1, second is #2. Choose players from any group.</p>
+      {roster.length === 0 ? <p className="text-sm text-gray-400 py-6 text-center">Add players to build {label}.</p> : (
+        <ol className="space-y-1.5 mt-3 max-h-72 overflow-y-auto">
+          {roster.map((id, index) => <li key={id} className="bg-white border border-gray-100 rounded-xl p-2 flex items-center gap-2">
+            <span className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold">#{index + 1}</span>
+            <span className="flex-1 text-sm font-medium text-gray-900 break-words">{playerName(playerById.get(id))}</span>
+            <button type="button" onClick={() => onToggle(id)} aria-label={`Remove ${playerName(playerById.get(id))} from ${label}`} className="p-1 text-red-400"><X className="w-4 h-4" /></button>
+          </li>)}
+        </ol>
+      )}
+      {showPicker && <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3 sm:p-6" onKeyDown={(event) => { if (event.key === 'Escape') setShowPicker(false); }}>
+        <section role="dialog" aria-modal="true" aria-label={`Choose players for ${label}`} className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+          <header className="p-4 border-b border-gray-100 flex items-center justify-between gap-3">
+            <div><h3 className="font-bold text-gray-900">Add players to {label}</h3><p className="text-xs text-gray-500 mt-1">Search across all groups. Each selection receives the next seed.</p></div>
+            <button type="button" onClick={() => setShowPicker(false)} aria-label="Close player picker" className="p-2 text-gray-400"><X className="w-5 h-5" /></button>
+          </header>
+          <div className="p-4 grid sm:grid-cols-2 gap-3 border-b border-gray-100">
+            <input autoFocus aria-label="Search players" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by player name or group..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
+            <select aria-label="Filter players by group" value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm">
+              <option value="">All groups</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </select>
+          </div>
+          <div className="overflow-y-auto min-h-0 p-4 space-y-2">
+            <p className="text-xs text-gray-500">{visiblePlayers.length} matching players. Players on the other team are excluded.</p>
+            {visiblePlayers.length === 0 && <p className="py-6 text-center text-gray-400">No players match. Try another name or select All groups.</p>}
+            {visiblePlayers.map((choice) => {
+              const seedIndex = roster.indexOf(choice.profile.id);
+              return <label key={choice.profile.id} className={`flex items-center gap-3 rounded-xl border p-3 cursor-pointer ${seedIndex >= 0 ? 'bg-emerald-50 border-emerald-300' : 'border-gray-200 hover:bg-gray-50'}`}>
+                <input type="checkbox" checked={seedIndex >= 0} onChange={() => onToggle(choice.profile.id)} aria-label={`Select ${choice.profile.full_name}`} className="w-4 h-4 accent-emerald-600" />
+                <span className="flex-1 min-w-0"><span className="block font-medium text-sm text-gray-900 break-words">{choice.profile.full_name}</span><span className="block text-xs text-gray-500 break-words">{choice.groupNames.join(', ')}</span></span>
+                <span className={`text-xs rounded px-2 py-1 ${seedIndex >= 0 ? 'bg-emerald-100 text-emerald-700 font-bold' : skillLevelColor(choice.profile.skill_level)}`}>{seedIndex >= 0 ? `Seed #${seedIndex + 1}` : skillLevelLabel(choice.profile.skill_level)}</span>
+              </label>;
+            })}
+          </div>
+          <footer className="p-4 border-t border-gray-100 flex items-center justify-between gap-3"><span className="text-sm text-gray-600">{roster.length} selected for {label}</span><button type="button" onClick={() => setShowPicker(false)} className="bg-emerald-500 text-white rounded-xl px-5 py-2.5 text-sm font-semibold">Done</button></footer>
+        </section>
+      </div>}
     </div>
   );
 }
@@ -637,8 +673,8 @@ function TeamBox({ name, side, players, winner }: { name: string; side: TeamLabe
 
 function ExtraMatchModal({ challenge, sideA, sideB, form, onToggle, onCourt, onTime, onRematch, onSave, onClose, saving }: {
   challenge: ChallengeDetails;
-  sideA?: CompetitionGroup & { group: Group };
-  sideB?: CompetitionGroup & { group: Group };
+  sideA?: CompetitionGroup & { group: Group | null };
+  sideB?: CompetitionGroup & { group: Group | null };
   form: typeof emptyExtraForm;
   onToggle: (side: TeamLabel, playerId: string) => void;
   onCourt: (value: number) => void;

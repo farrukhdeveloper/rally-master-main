@@ -1,9 +1,12 @@
--- Allow two separately seeded sides from the same source group.
+-- Named challenge teams can include players from any source groups.
 -- Existing competitions and results are preserved.
 BEGIN;
 
 ALTER TABLE public.competition_groups
   ADD COLUMN IF NOT EXISTS team_name text;
+
+ALTER TABLE public.competition_groups
+  ALTER COLUMN group_id DROP NOT NULL;
 
 ALTER TABLE public.competition_groups
   DROP CONSTRAINT IF EXISTS competition_groups_competition_id_group_id_key;
@@ -51,10 +54,10 @@ BEGIN
       ) RETURNING id INTO new_match_id;
 
       SELECT COALESCE(NULLIF(btrim(cg.team_name), ''), g.name) INTO group_a_name
-      FROM competition_groups cg JOIN groups g ON g.id = cg.group_id
+      FROM competition_groups cg LEFT JOIN groups g ON g.id = cg.group_id
       WHERE cg.competition_id = NEW.competition_id AND cg.side = 'A';
       SELECT COALESCE(NULLIF(btrim(cg.team_name), ''), g.name) INTO group_b_name
-      FROM competition_groups cg JOIN groups g ON g.id = cg.group_id
+      FROM competition_groups cg LEFT JOIN groups g ON g.id = cg.group_id
       WHERE cg.competition_id = NEW.competition_id AND cg.side = 'B';
 
       INSERT INTO match_teams (match_id, team_label, team_name)

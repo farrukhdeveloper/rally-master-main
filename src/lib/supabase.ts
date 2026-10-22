@@ -150,9 +150,9 @@ export interface CompetitionGroup {
   id: string;
   team_name?: string | null;
   competition_id: string;
-  group_id: string;
+  group_id: string | null;
   side: TeamLabel;
-  group?: Group;
+  group?: Group | null;
 }
 
 export interface CompetitionRoster {

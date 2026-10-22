@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  CalendarDays, Check, ChevronDown, ChevronUp, Clock, MapPin,
+  CalendarDays, Check, Clock, MapPin,
   Plus, RefreshCw, ShieldCheck, Swords, Trash2, Trophy, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -22,7 +22,7 @@ interface ChallengeDetails extends Competition {
 }
 
 const emptyForm = {
-  title: '', groupA: '', groupB: '', eventDate: '', startTime: '18:00', venue: '',
+  title: '', groupA: '', groupB: '', teamAName: '', teamBName: '', eventDate: '', startTime: '18:00', venue: '',
   courtCount: 2, fixtureMinutes: 10, countsForRankings: false,
 };
 
@@ -30,6 +30,10 @@ const emptyExtraForm = {
   playerA: [] as string[], playerB: [] as string[], courtNumber: 1,
   scheduledAt: '', allowRematch: false,
 };
+
+function sideName(side?: CompetitionGroup & { group?: Group }, fallback = 'Team') {
+  return side?.team_name?.trim() || side?.group?.name || fallback;
+}
 
 function dateTimeLabel(value: string) {
   return new Date(value).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
@@ -119,19 +123,10 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
   }, [rosterA.length, rosterB.length, form.courtCount, form.fixtureMinutes, form.eventDate, form.startTime]);
 
   function toggleRoster(side: TeamLabel, id: string) {
+    const otherRoster = side === 'A' ? rosterB : rosterA;
+    if (otherRoster.includes(id)) return;
     const update = side === 'A' ? setRosterA : setRosterB;
     update((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
-  }
-
-  function moveSeed(side: TeamLabel, index: number, direction: -1 | 1) {
-    const update = side === 'A' ? setRosterA : setRosterB;
-    update((current) => {
-      const target = index + direction;
-      if (target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
   }
 
   async function createChallenge() {
@@ -139,7 +134,13 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
     if (!user || !form.title.trim() || !form.groupA || !form.groupB || !form.eventDate || !form.venue.trim()) {
       setError('Complete the challenge name, groups, date, and venue.'); return;
     }
-    if (form.groupA === form.groupB) { setError('Choose two different groups.'); return; }
+    if (new Set([...rosterA, ...rosterB]).size !== rosterA.length + rosterB.length) {
+      setError('Each player can belong to only one side of this challenge.'); return;
+    }
+    if (rosterA.some((id) => !groupA?.members.some((member) => member.id === id))
+      || rosterB.some((id) => !groupB?.members.some((member) => member.id === id))) {
+      setError('Select players from the group chosen for each side.'); return;
+    }
     if (rosterA.length < 2 || rosterA.length !== rosterB.length) {
       setError('Both groups need the same number of seeded players, with at least two per group.'); return;
     }
@@ -147,6 +148,12 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
     const ownsEitherGroup = isSuperAdmin || groupA?.created_by === user.id || groupB?.created_by === user.id;
     if (!ownsEitherGroup) { setError('Only a participating group owner or super admin can create this challenge.'); return; }
 
+    const sameGroup = form.groupA === form.groupB;
+    const teamAName = form.teamAName.trim() || `${groupA?.name || 'Team'}${sameGroup ? ' A' : ''}`;
+    const teamBName = form.teamBName.trim() || `${groupB?.name || 'Team'}${sameGroup ? ' B' : ''}`;
+    if (teamAName.toLowerCase() === teamBName.toLowerCase()) {
+      setError('Give the two sides different team names.'); return;
+    }
     setSaving(true);
     const { data: competition, error: competitionError } = await supabase.from('competitions').insert({
       competition_type: 'group_challenge', title: form.title.trim(), environment: envFilter,
@@ -158,8 +165,8 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
 
     try {
       const { data: sides, error: sideError } = await supabase.from('competition_groups').insert([
-        { competition_id: competition.id, group_id: form.groupA, side: 'A' },
-        { competition_id: competition.id, group_id: form.groupB, side: 'B' },
+        { competition_id: competition.id, group_id: form.groupA, side: 'A', team_name: teamAName },
+        { competition_id: competition.id, group_id: form.groupB, side: 'B', team_name: teamBName },
       ]).select();
       if (sideError || !sides || sides.length !== 2) throw sideError || new Error('Could not save challenge groups.');
       const sideAId = sides.find((row: any) => row.side === 'A')!.id;
@@ -223,8 +230,8 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
 
   function leaderLabel() {
     if (!selected) return '';
-    const nameA = selectedSideA?.group?.name || 'Group A';
-    const nameB = selectedSideB?.group?.name || 'Group B';
+    const nameA = sideName(selectedSideA, 'Team A');
+    const nameB = sideName(selectedSideB, 'Team B');
     if (standings.winsA !== standings.winsB) return standings.winsA > standings.winsB ? `${nameA} lead` : `${nameB} lead`;
     const diff = standings.pointsA - standings.pointsB;
     if (diff !== 0) return diff > 0 ? `${nameA} lead on points` : `${nameB} lead on points`;
@@ -494,7 +501,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
 
       {showCreate && (
         <section className="bg-white border border-emerald-200 rounded-2xl p-4 sm:p-5 space-y-5">
-          <div className="flex items-center justify-between"><div><h2 className="font-bold text-gray-900">Create Seeded Challenge</h2><p className="text-xs text-gray-500 mt-1">Select equal rosters, then arrange each side by challenge seed.</p></div><button onClick={() => setShowCreate(false)} className="p-2 text-gray-400 hover:text-gray-800"><X className="w-5 h-5" /></button></div>
+          <div className="flex items-center justify-between"><div><h2 className="font-bold text-gray-900">Create Seeded Challenge</h2><p className="text-xs text-gray-500 mt-1">Choose one group for both sides or two different groups. Selection order sets seeds: first selected is #1. Partners rotate against the matching seeds on the other side.</p></div><button onClick={() => setShowCreate(false)} className="p-2 text-gray-400 hover:text-gray-800"><X className="w-5 h-5" /></button></div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Challenge name" className="lg:col-span-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
             <input type="date" value={form.eventDate} onChange={(e) => setForm({ ...form, eventDate: e.target.value })} className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
@@ -504,9 +511,18 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
             <label className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-500">Minutes / fixture<input type="number" min="1" value={form.fixtureMinutes} onChange={(e) => setForm({ ...form, fixtureMinutes: Math.max(1, Number(e.target.value)) })} className="block w-full bg-transparent text-gray-900 text-sm focus:outline-none" /></label>
           </div>
           <div className="grid lg:grid-cols-2 gap-4">
-            <RosterEditor side="A" groups={groups} selectedGroup={form.groupA} onGroup={(value) => { setForm({ ...form, groupA: value }); setRosterA([]); }} roster={rosterA} group={groupA} onToggle={(id) => toggleRoster('A', id)} onMove={(index, direction) => moveSeed('A', index, direction)} excludedGroup={form.groupB} />
-            <RosterEditor side="B" groups={groups} selectedGroup={form.groupB} onGroup={(value) => { setForm({ ...form, groupB: value }); setRosterB([]); }} roster={rosterB} group={groupB} onToggle={(id) => toggleRoster('B', id)} onMove={(index, direction) => moveSeed('B', index, direction)} excludedGroup={form.groupA} />
+            <RosterEditor side="A" groups={groups} selectedGroup={form.groupA} onGroup={(value) => { setForm({ ...form, groupA: value }); setRosterA([]); }} roster={rosterA} group={groupA} onToggle={(id) => toggleRoster('A', id)} otherRoster={rosterB} teamName={form.teamAName} onTeamName={(value) => setForm({ ...form, teamAName: value })} />
+            <RosterEditor side="B" groups={groups} selectedGroup={form.groupB} onGroup={(value) => { setForm({ ...form, groupB: value }); setRosterB([]); }} roster={rosterB} group={groupB} onToggle={(id) => toggleRoster('B', id)} otherRoster={rosterA} teamName={form.teamBName} onTeamName={(value) => setForm({ ...form, teamBName: value })} />
           </div>
+          {rosterA.length > 0 && rosterB.length > 0 && (
+            <div className="rounded-xl border border-gray-200 p-3 space-y-1 text-xs text-gray-600">
+              <p className="font-semibold text-gray-900">Matching seeds across the two sides</p>
+              {Array.from({ length: Math.max(rosterA.length, rosterB.length) }, (_, index) => (
+                <p key={index}>#{index + 1}: {playerName(groupA?.members.find((member) => member.id === rosterA[index]))} vs {playerName(groupB?.members.find((member) => member.id === rosterB[index]))}</p>
+              ))}
+              <p className="text-gray-400">Example: seeds #1 + #2 on side A play seeds #1 + #2 on side B. Remove and reselect a player to change their seed.</p>
+            </div>
+          )}
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-t border-gray-100 pt-4">
             <div className="flex flex-wrap gap-2 text-xs">
               <span className="bg-sky-50 text-sky-700 px-3 py-2 rounded-lg">{preview?.totalFixtures || 0} fixtures</span><span className="bg-violet-50 text-violet-700 px-3 py-2 rounded-lg">{preview?.rounds || 0} rounds</span><span className="bg-amber-50 text-amber-700 px-3 py-2 rounded-lg">{preview?.appearancesPerPlayer || 0} games / player</span>{preview && <span className="bg-gray-100 text-gray-600 px-3 py-2 rounded-lg">Finish {new Date(preview.estimatedFinish).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
@@ -520,7 +536,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
         <aside className="space-y-2">
           <div className="flex items-center justify-between px-1"><h2 className="font-semibold text-gray-900">Challenges</h2><button onClick={loadData} className="p-2 text-gray-400 hover:text-gray-800"><RefreshCw className="w-4 h-4" /></button></div>
           {loading ? <div className="h-28 bg-gray-200 animate-pulse rounded-xl" /> : challenges.length === 0 ? <div className="bg-white border border-dashed border-gray-200 rounded-xl p-6 text-center text-sm text-gray-400">No challenges yet.</div> : challenges.map((challenge) => {
-            const a = challenge.groups.find((row) => row.side === 'A')?.group?.name || 'Group A'; const b = challenge.groups.find((row) => row.side === 'B')?.group?.name || 'Group B';
+            const a = sideName(challenge.groups.find((row) => row.side === 'A'), 'Team A'); const b = sideName(challenge.groups.find((row) => row.side === 'B'), 'Team B');
             return <button key={challenge.id} onClick={() => setSelectedId(challenge.id)} className={`w-full text-left p-3 rounded-xl border transition-all ${challenge.id === selectedId ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-gray-200 hover:border-gray-300'}`}><p className="font-semibold text-gray-900 break-words">{challenge.title}</p><p className="text-xs text-gray-500 mt-1 break-words">{a} vs {b}</p><p className="text-xs text-gray-400 mt-2">{challenge.event_date} · {challenge.status.replace('_', ' ')}</p></button>;
           })}
         </aside>
@@ -530,7 +546,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
             <div className="space-y-4">
               <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
                 <div className="p-4 sm:p-5 bg-emerald-50 border-b border-emerald-100"><div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3"><div><div className="flex items-center gap-2 flex-wrap"><h2 className="text-xl font-bold text-gray-900">{selected.title}</h2>{isOrganiser && <span className="inline-flex items-center gap-1 bg-white border border-emerald-200 text-emerald-700 px-2 py-1 rounded-lg text-xs"><ShieldCheck className="w-3.5 h-3.5" />Organiser</span>}{!selected.counts_for_rankings && <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-lg text-xs">Exhibition</span>}</div><div className="flex flex-wrap gap-3 text-xs text-gray-500 mt-2"><span className="flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" />{selected.event_date}</span><span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{selected.start_time.slice(0, 5)}</span><span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{selected.venue}</span></div></div><div className="flex items-center gap-2 flex-wrap"><span className="bg-white border border-emerald-200 px-3 py-2 rounded-xl text-sm font-semibold text-emerald-700">{leaderLabel()}</span></div></div></div>
-                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 p-4 sm:p-6"><div className="text-center min-w-0"><p className="font-bold text-gray-900 break-words">{selectedSideA?.group?.name}</p><p className="text-3xl font-bold text-sky-600 mt-2">{standings.winsA}</p><p className="text-xs text-gray-400">fixture wins · {standings.pointsA - standings.pointsB >= 0 ? '+' : ''}{standings.pointsA - standings.pointsB} diff</p></div><div className="text-gray-300 font-bold">vs</div><div className="text-center min-w-0"><p className="font-bold text-gray-900 break-words">{selectedSideB?.group?.name}</p><p className="text-3xl font-bold text-rose-600 mt-2">{standings.winsB}</p><p className="text-xs text-gray-400">fixture wins · {standings.pointsB - standings.pointsA >= 0 ? '+' : ''}{standings.pointsB - standings.pointsA} diff</p></div></div>
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 p-4 sm:p-6"><div className="text-center min-w-0"><p className="font-bold text-gray-900 break-words">{sideName(selectedSideA, 'Team A')}</p><p className="text-3xl font-bold text-sky-600 mt-2">{standings.winsA}</p><p className="text-xs text-gray-400">fixture wins · {standings.pointsA - standings.pointsB >= 0 ? '+' : ''}{standings.pointsA - standings.pointsB} diff</p></div><div className="text-gray-300 font-bold">vs</div><div className="text-center min-w-0"><p className="font-bold text-gray-900 break-words">{sideName(selectedSideB, 'Team B')}</p><p className="text-3xl font-bold text-rose-600 mt-2">{standings.winsB}</p><p className="text-xs text-gray-400">fixture wins · {standings.pointsB - standings.pointsA >= 0 ? '+' : ''}{standings.pointsB - standings.pointsA} diff</p></div></div>
                 <div className="grid grid-cols-3 border-t border-gray-100 text-center text-xs"><div className="p-3"><b className="block text-gray-900 text-base">{standings.completed}</b><span className="text-gray-400">Completed</span></div><div className="p-3 border-x border-gray-100"><b className="block text-gray-900 text-base">{selected.fixtures.length - standings.completed}</b><span className="text-gray-400">Remaining</span></div><div className="p-3"><b className="block text-gray-900 text-base">{regularRoundCount}</b><span className="text-gray-400">Rounds{extraMatchCount > 0 ? ` + ${extraMatchCount} extra` : ''}</span></div></div>
               </section>
 
@@ -559,20 +575,54 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
                 )}
               </div>
 
-              {visibleRounds.map(({ round, fixtures }) => { const extraRound = fixtures.every((fixture) => fixture.is_extra); return <section key={round} className={`bg-white border rounded-2xl p-4 ${extraRound ? 'border-violet-200' : 'border-gray-200'}`}><h3 className="font-semibold text-gray-900 mb-3">{extraRound ? 'Extra Match' : `Round ${round}`}</h3><div className="grid xl:grid-cols-2 gap-3">{fixtures.map((fixture) => <FixtureCard key={fixture.id} fixture={fixture} groupA={selectedSideA?.group?.name || 'Group A'} groupB={selectedSideB?.group?.name || 'Group B'} canSubmit={isOrganiser || (isRosterPlayer && fixture.status === 'scheduled')} isOrganiser={isOrganiser} onResult={() => openResult(fixture)} onClear={() => clearResult(fixture)} onDelete={() => deleteFixture(fixture)} />)}</div></section>; })}
+              {visibleRounds.map(({ round, fixtures }) => { const extraRound = fixtures.every((fixture) => fixture.is_extra); return <section key={round} className={`bg-white border rounded-2xl p-4 ${extraRound ? 'border-violet-200' : 'border-gray-200'}`}><h3 className="font-semibold text-gray-900 mb-3">{extraRound ? 'Extra Match' : `Round ${round}`}</h3><div className="grid xl:grid-cols-2 gap-3">{fixtures.map((fixture) => <FixtureCard key={fixture.id} fixture={fixture} groupA={sideName(selectedSideA, 'Team A')} groupB={sideName(selectedSideB, 'Team B')} canSubmit={isOrganiser || (isRosterPlayer && fixture.status === 'scheduled')} isOrganiser={isOrganiser} onResult={() => openResult(fixture)} onClear={() => clearResult(fixture)} onDelete={() => deleteFixture(fixture)} />)}</div></section>; })}
             </div>
           )}
         </main>
       </div>
 
-      {resultFixture && selected && <ResultModal fixture={resultFixture} groupA={selectedSideA?.group?.name || 'Group A'} groupB={selectedSideB?.group?.name || 'Group B'} scoreA={scoreA} scoreB={scoreB} onScoreA={setScoreA} onScoreB={setScoreB} onSave={saveResult} onClose={() => setResultFixture(null)} saving={saving} />}
+      {resultFixture && selected && <ResultModal fixture={resultFixture} groupA={sideName(selectedSideA, 'Team A')} groupB={sideName(selectedSideB, 'Team B')} scoreA={scoreA} scoreB={scoreB} onScoreA={setScoreA} onScoreB={setScoreB} onSave={saveResult} onClose={() => setResultFixture(null)} saving={saving} />}
       {showExtraMatch && selected && <ExtraMatchModal challenge={selected} sideA={selectedSideA} sideB={selectedSideB} form={extraForm} onToggle={toggleExtraPlayer} onCourt={(courtNumber) => setExtraForm((current) => ({ ...current, courtNumber }))} onTime={(scheduledAt) => setExtraForm((current) => ({ ...current, scheduledAt }))} onRematch={(allowRematch) => setExtraForm((current) => ({ ...current, allowRematch }))} onSave={addExtraMatch} onClose={() => setShowExtraMatch(false)} saving={saving} />}
     </div>
   );
 }
 
-function RosterEditor({ side, groups, selectedGroup, onGroup, roster, group, onToggle, onMove, excludedGroup }: { side: TeamLabel; groups: GroupWithMembers[]; selectedGroup: string; onGroup: (value: string) => void; roster: string[]; group?: GroupWithMembers; onToggle: (id: string) => void; onMove: (index: number, direction: -1 | 1) => void; excludedGroup: string }) {
-  return <div className={`border rounded-2xl p-4 ${side === 'A' ? 'border-sky-200 bg-sky-50' : 'border-rose-200 bg-rose-50'}`}><label className="text-xs font-semibold text-gray-500">Group {side}</label><select value={selectedGroup} onChange={(e) => onGroup(e.target.value)} className="w-full mt-1 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm"><option value="">Select group</option>{groups.filter((item) => item.id !== excludedGroup).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>{roster.length > 0 && <div className="space-y-1.5 mt-3">{roster.map((id, index) => { const profile = group?.members.find((member) => member.id === id); return <div key={id} className="bg-white border border-gray-100 rounded-xl p-2 flex items-center gap-2"><span className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold">{index + 1}</span><span className="flex-1 text-sm font-medium text-gray-900 break-words">{playerName(profile)}</span><button onClick={() => onMove(index, -1)} disabled={index === 0} className="p-1 text-gray-400 disabled:opacity-20"><ChevronUp className="w-4 h-4" /></button><button onClick={() => onMove(index, 1)} disabled={index === roster.length - 1} className="p-1 text-gray-400 disabled:opacity-20"><ChevronDown className="w-4 h-4" /></button><button onClick={() => onToggle(id)} className="p-1 text-red-400"><X className="w-4 h-4" /></button></div>; })}</div>}<div className="mt-3"><p className="text-xs font-semibold text-gray-400 mb-2">GROUP MEMBERS</p><div className="grid sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">{group?.members.filter((member) => !roster.includes(member.id)).map((member) => <button key={member.id} onClick={() => onToggle(member.id)} className="text-left bg-white border border-gray-100 rounded-lg px-2.5 py-2 text-xs hover:border-emerald-300"><span className="block font-medium text-gray-800 break-words">{member.full_name}</span><span className={`inline-block mt-1 px-1.5 py-0.5 rounded ${skillLevelColor(member.skill_level)}`}>{skillLevelLabel(member.skill_level)}</span></button>)}</div></div></div>;
+function RosterEditor({ side, groups, selectedGroup, onGroup, roster, group, onToggle, otherRoster, teamName, onTeamName }: {
+  side: TeamLabel; groups: GroupWithMembers[]; selectedGroup: string; onGroup: (value: string) => void;
+  roster: string[]; group?: GroupWithMembers; onToggle: (id: string) => void; otherRoster: string[];
+  teamName: string; onTeamName: (value: string) => void;
+}) {
+  return (
+    <div className={`border rounded-2xl p-4 ${side === 'A' ? 'border-sky-200 bg-sky-50' : 'border-rose-200 bg-rose-50'}`}>
+      <label className="text-xs font-semibold text-gray-500" htmlFor={`challenge-group-${side}`}>Source group for side {side}</label>
+      <select id={`challenge-group-${side}`} value={selectedGroup} onChange={(event) => onGroup(event.target.value)} className="w-full mt-1 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm">
+        <option value="">Select group</option>
+        {groups.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select>
+      <label className="block text-xs font-semibold text-gray-500 mt-3" htmlFor={`challenge-team-${side}`}>Team {side} name (optional)</label>
+      <input id={`challenge-team-${side}`} value={teamName} onChange={(event) => onTeamName(event.target.value)} placeholder={side === 'A' ? 'e.g. Smashers' : 'e.g. Strikers'} className="w-full mt-1 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
+      <p className="text-xs text-gray-500 mt-2">Selection order sets seeds on this side. Players selected on the other side are unavailable.</p>
+      {roster.length > 0 && <div className="space-y-1.5 mt-3">{roster.map((id, index) => {
+        const profile = group?.members.find((member) => member.id === id);
+        return <div key={id} className="bg-white border border-gray-100 rounded-xl p-2 flex items-center gap-2">
+          <span className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold">#{index + 1}</span>
+          <span className="flex-1 text-sm font-medium text-gray-900 break-words">{playerName(profile)}</span>
+          <button onClick={() => onToggle(id)} aria-label={`Remove ${playerName(profile)} from side ${side}`} className="p-1 text-red-400"><X className="w-4 h-4" /></button>
+        </div>;
+      })}</div>}
+      <div className="mt-3">
+        <p className="text-xs font-semibold text-gray-400 mb-2">AVAILABLE GROUP MEMBERS</p>
+        <div className="grid sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto">
+          {group?.members.filter((member) => !roster.includes(member.id) && !otherRoster.includes(member.id)).map((member) => (
+            <button key={member.id} onClick={() => onToggle(member.id)} className="text-left bg-white border border-gray-100 rounded-lg px-2.5 py-2 text-xs hover:border-emerald-300">
+              <span className="block font-medium text-gray-800 break-words">{member.full_name}</span>
+              <span className={`inline-block mt-1 px-1.5 py-0.5 rounded ${skillLevelColor(member.skill_level)}`}>{skillLevelLabel(member.skill_level)}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function FixtureCard({ fixture, groupA, groupB, canSubmit, isOrganiser, onResult, onClear, onDelete }: { fixture: CompetitionFixture; groupA: string; groupB: string; canSubmit: boolean; isOrganiser: boolean; onResult: () => void; onClear: () => void; onDelete: () => void }) {
@@ -620,7 +670,7 @@ function ExtraMatchModal({ challenge, sideA, sideB, form, onToggle, onCourt, onT
     </div>
   );
 
-  return <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4"><div className="bg-white w-full sm:max-w-3xl rounded-t-2xl sm:rounded-2xl max-h-[95vh] overflow-y-auto"><div className="sticky top-0 z-10 bg-white flex items-start justify-between gap-3 p-4 sm:p-5 border-b border-gray-100"><div><h3 className="font-bold text-gray-900 flex items-center gap-2"><Plus className="w-4 h-4 text-violet-600" />Add Extra Match</h3><p className="text-xs text-gray-500 mt-1">Adds a separate fixture without changing the generated seeded schedule.</p></div><button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-700"><X className="w-5 h-5" /></button></div><div className="p-4 sm:p-5 space-y-4"><div className="grid sm:grid-cols-2 gap-3"><label className="text-xs font-semibold text-gray-500">Court<select value={form.courtNumber} onChange={(event) => onCourt(Number(event.target.value))} className="block w-full mt-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900">{Array.from({ length: challenge.court_count }, (_, index) => <option key={index + 1} value={index + 1}>Court {index + 1}</option>)}</select></label><label className="text-xs font-semibold text-gray-500">Scheduled time<input type="datetime-local" value={form.scheduledAt} onChange={(event) => onTime(event.target.value)} className="block w-full mt-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900" /></label></div><div className="grid md:grid-cols-2 gap-3">{sidePicker('A', rosterA, form.playerA, sideA?.group?.name || 'Group A')}{sidePicker('B', rosterB, form.playerB, sideB?.group?.name || 'Group B')}</div><label className="flex items-start gap-2 text-sm text-gray-600"><input type="checkbox" checked={form.allowRematch} onChange={(event) => onRematch(event.target.checked)} className="mt-0.5 w-4 h-4 accent-violet-600" /><span><b className="block text-gray-800">Allow intentional rematch</b>Use only when these exact pairs should play again.</span></label><p className="text-xs text-gray-400">This match counts toward the challenge score and follows the challenge's ranking setting.</p></div><div className="sticky bottom-0 bg-white border-t border-gray-100 p-4 flex justify-end gap-2"><button onClick={onClose} className="px-4 py-2.5 bg-gray-100 text-gray-600 rounded-xl text-sm">Cancel</button><button onClick={onSave} disabled={!canSave} className="px-5 py-2.5 bg-violet-600 disabled:opacity-40 text-white rounded-xl text-sm font-semibold">{saving ? 'Adding...' : 'Add Extra Match'}</button></div></div></div>;
+  return <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-0 sm:p-4"><div className="bg-white w-full sm:max-w-3xl rounded-t-2xl sm:rounded-2xl max-h-[95vh] overflow-y-auto"><div className="sticky top-0 z-10 bg-white flex items-start justify-between gap-3 p-4 sm:p-5 border-b border-gray-100"><div><h3 className="font-bold text-gray-900 flex items-center gap-2"><Plus className="w-4 h-4 text-violet-600" />Add Extra Match</h3><p className="text-xs text-gray-500 mt-1">Adds a separate fixture without changing the generated seeded schedule.</p></div><button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-700"><X className="w-5 h-5" /></button></div><div className="p-4 sm:p-5 space-y-4"><div className="grid sm:grid-cols-2 gap-3"><label className="text-xs font-semibold text-gray-500">Court<select value={form.courtNumber} onChange={(event) => onCourt(Number(event.target.value))} className="block w-full mt-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900">{Array.from({ length: challenge.court_count }, (_, index) => <option key={index + 1} value={index + 1}>Court {index + 1}</option>)}</select></label><label className="text-xs font-semibold text-gray-500">Scheduled time<input type="datetime-local" value={form.scheduledAt} onChange={(event) => onTime(event.target.value)} className="block w-full mt-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-900" /></label></div><div className="grid md:grid-cols-2 gap-3">{sidePicker('A', rosterA, form.playerA, sideName(sideA, 'Team A'))}{sidePicker('B', rosterB, form.playerB, sideName(sideB, 'Team B'))}</div><label className="flex items-start gap-2 text-sm text-gray-600"><input type="checkbox" checked={form.allowRematch} onChange={(event) => onRematch(event.target.checked)} className="mt-0.5 w-4 h-4 accent-violet-600" /><span><b className="block text-gray-800">Allow intentional rematch</b>Use only when these exact pairs should play again.</span></label><p className="text-xs text-gray-400">This match counts toward the challenge score and follows the challenge's ranking setting.</p></div><div className="sticky bottom-0 bg-white border-t border-gray-100 p-4 flex justify-end gap-2"><button onClick={onClose} className="px-4 py-2.5 bg-gray-100 text-gray-600 rounded-xl text-sm">Cancel</button><button onClick={onSave} disabled={!canSave} className="px-5 py-2.5 bg-violet-600 disabled:opacity-40 text-white rounded-xl text-sm font-semibold">{saving ? 'Adding...' : 'Add Extra Match'}</button></div></div></div>;
 }
 
 function ResultModal({ fixture, groupA, groupB, scoreA, scoreB, onScoreA, onScoreB, onSave, onClose, saving }: { fixture: CompetitionFixture; groupA: string; groupB: string; scoreA: string; scoreB: string; onScoreA: (value: string) => void; onScoreB: (value: string) => void; onSave: () => void; onClose: () => void; saving: boolean }) {

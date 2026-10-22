@@ -148,6 +148,7 @@ export interface Competition {
 
 export interface CompetitionGroup {
   id: string;
+  team_name?: string | null;
   competition_id: string;
   group_id: string;
   side: TeamLabel;

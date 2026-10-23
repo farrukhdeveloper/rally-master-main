@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 
 export type Page = 'dashboard' | 'sessions' | 'courts' | 'matches' | 'planner' | 'challenges' | 'leaderboard' | 'admin' | 'history' | 'help' | 'profile';
-export type AdminSubPage = 'sessions' | 'groups' | 'players' | 'rankings' | 'whatsapp' | 'settings';
+export type AdminSubPage = 'sessions' | 'groups' | 'players' | 'rankings' | 'whatsapp' | 'contact' | 'settings';
 
 interface LayoutProps {
   children: ReactNode;
@@ -40,6 +40,7 @@ const ADMIN_SUB_ITEMS: { id: AdminSubPage; label: string }[] = [
   { id: 'players', label: 'Players' },
   { id: 'rankings', label: 'Player Rankings' },
   { id: 'whatsapp', label: 'WhatsApp Poll' },
+  { id: 'contact', label: 'Contact Requests' },
   { id: 'settings', label: 'Settings' },
 ];
 

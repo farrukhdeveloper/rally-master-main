@@ -58,6 +58,7 @@ export default function AdminPage({ tab }: { tab: AdminSubPage }) {
       {tab === 'players' && <PlayersAdmin envFilter={envFilter} />}
       {tab === 'rankings' && <PlayerRankings envFilter={envFilter} />}
       {tab === 'whatsapp' && <WhatsAppPoll envFilter={envFilter} />}
+      {tab === 'contact' && <ContactRequests />}
       {tab === 'settings' && <AppSettings />}
     </div>
   );
@@ -2500,6 +2501,55 @@ function formatLastLogin(value?: string | null) {
   })}`;
 }
 // -----------------------------------------------------------------------------
+
+interface ContactRequest {
+  id: string;
+  created_at: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  message: string;
+  email_status: 'pending' | 'sent' | 'failed';
+}
+
+function ContactRequests() {
+  const [requests, setRequests] = useState<ContactRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  async function loadRequests() {
+    setLoading(true);
+    const { data, error: queryError } = await supabase.from('contact_requests')
+      .select('*').order('created_at', { ascending: false }).limit(100);
+    setError(queryError?.message || '');
+    setRequests((data as ContactRequest[]) || []);
+    setLoading(false);
+  }
+
+  useEffect(() => { loadRequests(); }, []);
+
+  return <div className="max-w-4xl space-y-4">
+    <div className="flex items-center justify-between gap-3">
+      <div><h2 className="font-semibold text-gray-900 text-lg">Contact Requests</h2>
+        <p className="text-sm text-gray-500">Messages are saved here even if email delivery fails.</p></div>
+      <button onClick={loadRequests} className="flex items-center gap-1.5 text-sm text-emerald-700 font-medium"><RefreshCw className="w-4 h-4" /> Refresh</button>
+    </div>
+    {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+    {loading ? <p className="text-gray-500 text-sm">Loading requests...</p> : requests.length === 0 ?
+      <p className="text-gray-500 text-sm bg-white border border-gray-200 rounded-xl p-5">No contact requests yet.</p> :
+      requests.map((request) => <article key={request.id} className="bg-white border border-gray-200 rounded-xl p-4 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <strong className="text-gray-900">{request.full_name}</strong>
+          <span className="text-xs text-gray-500">{new Date(request.created_at).toLocaleString()}</span>
+        </div>
+        <p className="text-sm text-gray-600">{request.email}{request.phone ? ` · ${request.phone}` : ''}</p>
+        <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{request.message}</p>
+        <p className={`text-xs ${request.email_status === 'sent' ? 'text-emerald-700' : 'text-amber-700'}`}>
+          Email notification: {request.email_status}
+        </p>
+      </article>)}
+  </div>;
+}
 
 function AppSettings() {
   const { appName, refreshAppName } = useAuth();

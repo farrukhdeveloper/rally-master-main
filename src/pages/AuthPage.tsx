@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import HelpPage from './HelpPage';
 import ContactPage from './ContactPage';
+import Turnstile, { turnstileSiteKey } from '../components/Turnstile';
 import { Feather, Mail, Lock, User, Phone, CalendarCheck, Monitor, Trophy, HelpCircle, MessageCircle, ArrowLeft } from 'lucide-react';
 
 type Mode = 'login' | 'register';
@@ -20,19 +21,25 @@ export default function AuthPage() {
   const [showHelp, setShowHelp] = useState(false);
   const [showContact, setShowContact] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState('');
+  const [captchaReset, setCaptchaReset] = useState(0);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     setSuccess('');
+    if (turnstileSiteKey && !captchaToken) {
+      setError('Complete the verification before continuing.');
+      return;
+    }
     setLoading(true);
 
     try {
       if (mode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error } = await supabase.auth.signInWithPassword({ email, password, options: { captchaToken } });
         if (error) throw error;
       } else {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabase.auth.signUp({ email, password, options: { captchaToken } });
         if (error) throw error;
         if (data.user) {
           const { error: profileError } = await supabase.from('profiles').insert({
@@ -56,6 +63,8 @@ export default function AuthPage() {
       setError(err.message || 'Something went wrong');
     } finally {
       setLoading(false);
+      setCaptchaToken('');
+      setCaptchaReset((value) => value + 1);
     }
   }
 
@@ -63,11 +72,18 @@ export default function AuthPage() {
     e.preventDefault();
     setError('');
     setSuccess('');
+    if (turnstileSiteKey && !captchaToken) {
+      setError('Complete the verification before continuing.');
+      return;
+    }
     setLoading(true);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: window.location.origin,
+      captchaToken,
     });
     setLoading(false);
+    setCaptchaToken('');
+    setCaptchaReset((value) => value + 1);
     if (error) {
       setError(error.message);
       return;
@@ -139,7 +155,7 @@ export default function AuthPage() {
               {(['login', 'register'] as Mode[]).map((m) => (
                 <button
                   key={m}
-                  onClick={() => { setMode(m); setError(''); setSuccess(''); }}
+                  onClick={() => { setMode(m); setError(''); setSuccess(''); setCaptchaToken(''); setCaptchaReset((value) => value + 1); }}
                   className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${
                     mode === m
                       ? 'bg-emerald-500 text-white shadow-sm'
@@ -183,6 +199,7 @@ export default function AuthPage() {
                 onChange={setEmail}
                 required
               />
+              <Turnstile onToken={setCaptchaToken} onError={setError} resetKey={captchaReset} />
               <button
                 type="submit"
                 disabled={loading}
@@ -229,6 +246,7 @@ export default function AuthPage() {
               onChange={setPassword}
               required
             />
+            <Turnstile onToken={setCaptchaToken} onError={setError} resetKey={captchaReset} />
 
             <button
               type="submit"

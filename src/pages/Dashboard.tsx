@@ -50,6 +50,7 @@ export default function Dashboard({ envFilter = 'prod' }: { envFilter?: Environm
   const [upcomingSessions, setUpcomingSessions] = useState<Session[]>([]);
   const [myAvailability, setMyAvailability] = useState<Record<string, boolean>>({});
   const [myInvites, setMyInvites] = useState<Record<string, SessionInvite>>({});
+  const [challengeRosterSessions, setChallengeRosterSessions] = useState<Set<string>>(new Set());
   const [joinRequests, setJoinRequests] = useState<SessionInviteWithDetails[]>([]);
   const [adminInvites, setAdminInvites] = useState<SessionInvite[]>([]);
   const [allPlayers, setAllPlayers] = useState<Profile[]>([]);
@@ -88,9 +89,9 @@ export default function Dashboard({ envFilter = 'prod' }: { envFilter?: Environm
       .order('session_date', { ascending: true });
 
     const sessions = (sessionsRes.data || []) as Session[];
-    const managedSessionIds = new Set(sessions.filter(canManageSession).map((session) => session.id));
+    const managedSessionIds = new Set(sessions.filter((session) => session.session_type !== 'group_challenge' && canManageSession(session)).map((session) => session.id));
 
-    const [availRes, invitesRes, historyRes, ownerAvailRes, ownerInvitesRes, playersRes, communityMatchesRes, rankedCompetitionsRes] = await Promise.all([
+    const [availRes, invitesRes, historyRes, ownerAvailRes, ownerInvitesRes, playersRes, communityMatchesRes, rankedCompetitionsRes, challengeRosterRes] = await Promise.all([
       supabase
         .from('session_availability')
         .select('*')
@@ -123,9 +124,20 @@ export default function Dashboard({ envFilter = 'prod' }: { envFilter?: Environm
         .select('session_id, competition_groups(side, group_id, group:groups(id, name))')
         .eq('environment', envFilter)
         .eq('counts_for_rankings', true),
+      supabase
+        .from('competition_rosters')
+        .select('competition:competitions!inner(session_id, environment)')
+        .eq('player_id', user.id)
+        .eq('competition.environment', envFilter),
     ]);
 
     setUpcomingSessions(sessions);
+    const rosterSessions = new Set<string>();
+    for (const row of (challengeRosterRes.data as unknown as Array<{ competition?: OneOrMany<{ session_id: string }> }>) || []) {
+      const competition = Array.isArray(row.competition) ? row.competition[0] : row.competition;
+      if (competition?.session_id) rosterSessions.add(competition.session_id);
+    }
+    setChallengeRosterSessions(rosterSessions);
     const firstManagedSession = sessions.find((session) => managedSessionIds.has(session.id));
     if (firstManagedSession && !managedSessionIds.has(inviteSessionId)) setInviteSessionId(firstManagedSession.id);
 
@@ -361,7 +373,7 @@ export default function Dashboard({ envFilter = 'prod' }: { envFilter?: Environm
   const winRate = stats && stats.total_matches > 0
     ? Math.round((stats.wins / stats.total_matches) * 100)
     : 0;
-  const ownedSessions = upcomingSessions.filter(canManageSession);
+  const ownedSessions = upcomingSessions.filter((session) => session.session_type !== 'group_challenge' && canManageSession(session));
 
   if (loading) return <LoadingState />;
 
@@ -447,6 +459,10 @@ export default function Dashboard({ envFilter = 'prod' }: { envFilter?: Environm
                 {isSessionOwner ? (
                   <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-sky-50 text-sky-700 border border-sky-200">
                     <Users className="w-4 h-4" /> Session owner
+                  </div>
+                ) : session.session_type === 'group_challenge' ? (
+                  <div className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold border ${challengeRosterSessions.has(session.id) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                    <Users className="w-4 h-4" /> {challengeRosterSessions.has(session.id) ? "You're on the challenge roster" : 'Challenge roster is set'}
                   </div>
                 ) : (
                   <SessionActionButtons

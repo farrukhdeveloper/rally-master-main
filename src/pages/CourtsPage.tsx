@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { supabase, Match, Court, Session, Profile, MatchTeamWithPlayers, Environment } from '../lib/supabase';
+import { supabase, Match, Court, Session, Profile, MatchTeamWithPlayers, Environment, CompetitionFixture, CompetitionGroup } from '../lib/supabase';
 import { skillLevelColor, skillLevelLabel, skillLevelTextColor } from '../lib/skillLevels';
 import { useAuth } from '../context/AuthContext';
 import { Monitor, Clock, Users, Wifi, WifiOff, Hash } from 'lucide-react';
@@ -24,6 +24,8 @@ interface CourtView {
   match: MatchWithDetails | null;
   waiting: CourtQueue[];
   resting: CourtQueue[];
+  fixtures: CompetitionFixture[];
+  teamNames: { A: string; B: string };
 }
 
 interface PlayerGameCount {
@@ -52,7 +54,7 @@ interface NextUpItem {
   label: string;
 }
 
-function getPlayerNextGame(playerId: string | undefined, courtViews: CourtView[], playerGameCounts: PlayerGameCount[]): PlayerNextGame | null {
+function getPlayerNextGame(playerId: string | undefined, courtViews: CourtView[], playerGameCounts: PlayerGameCount[], isChallenge: boolean): PlayerNextGame | null {
   if (!playerId) return null;
 
   for (const cv of courtViews) {
@@ -75,6 +77,22 @@ function getPlayerNextGame(playerId: string | undefined, courtViews: CourtView[]
         };
       }
     }
+  }
+
+  if (isChallenge) {
+    const next = courtViews.flatMap((cv) => cv.fixtures.map((fixture) => ({ cv, fixture })))
+      .filter(({ fixture }) => fixture.players?.some((player) => player.player_id === playerId))
+      .sort((a, b) => a.fixture.scheduled_at.localeCompare(b.fixture.scheduled_at))[0];
+    if (next) {
+      const side = next.fixture.players?.find((player) => player.player_id === playerId)?.side;
+      const partner = next.fixture.players?.find((player) => player.side === side && player.player_id !== playerId)?.profile?.full_name;
+      return {
+        state: 'waiting', title: 'Your next challenge match',
+        detail: `${new Date(next.fixture.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}${partner ? ` · Partner: ${partner}` : ''}`,
+        courtName: next.cv.court.name, positionLabel: `Round ${next.fixture.round_number}`, tone: 'sky',
+      };
+    }
+    return { state: 'none', title: 'No upcoming challenge match', detail: 'You have no remaining scheduled fixtures in this challenge', tone: 'gray' };
   }
 
   for (const cv of courtViews) {
@@ -176,6 +194,7 @@ export default function CourtsPage({ envFilter = 'prod' }: { envFilter?: Environ
   }, [envFilter]);
 
   const loadData = useCallback(async (sessionId: string) => {
+    const isChallenge = sessions.find((session) => session.id === sessionId)?.session_type === 'group_challenge';
     const [matchesRes, courtsRes, queuesRes, allMatchesRes, availRes] = await Promise.all([
       supabase
         .from('matches')
@@ -205,11 +224,32 @@ export default function CourtsPage({ envFilter = 'prod' }: { envFilter?: Environ
     const courts: Court[] = courtsRes.data || [];
     const queues: CourtQueue[] = (queuesRes.data as any) || [];
 
-    const views: CourtView[] = courts.map((court) => ({
+    let fixtures: CompetitionFixture[] = [];
+    let teamNames = { A: 'Team A', B: 'Team B' };
+    if (isChallenge) {
+      const { data: competition } = await supabase.from('competitions').select('id').eq('session_id', sessionId).maybeSingle();
+      if (competition) {
+        const [fixturesRes, groupsRes] = await Promise.all([
+          supabase.from('competition_fixtures')
+            .select('*, players:competition_fixture_players(*, profile:profiles(*))')
+            .eq('competition_id', competition.id).eq('status', 'scheduled')
+            .order('scheduled_at').order('round_number').order('wave_number'),
+          supabase.from('competition_groups').select('*, group:groups(*)').eq('competition_id', competition.id),
+        ]);
+        fixtures = (fixturesRes.data as CompetitionFixture[]) || [];
+        for (const group of (groupsRes.data || []) as CompetitionGroup[]) {
+          teamNames[group.side] = group.team_name || group.group?.name || `Team ${group.side}`;
+        }
+      }
+    }
+
+    const views: CourtView[] = courts.map((court, index) => ({
       court,
       match: matches.find((m) => m.court_id === court.id) || null,
       waiting: queues.filter((q) => q.court_id === court.id && q.status === 'waiting'),
       resting: queues.filter((q) => q.court_id === court.id && q.status === 'resting'),
+      fixtures: fixtures.filter((fixture) => fixture.court_number === index + 1),
+      teamNames,
     }));
 
     // Build game count per player
@@ -250,7 +290,7 @@ export default function CourtsPage({ envFilter = 'prod' }: { envFilter?: Environ
     setCourtViews(views);
     setPlayerGameCounts(gameCounts);
     setLastUpdated(new Date());
-  }, [envFilter]);
+  }, [envFilter, sessions]);
 
   useEffect(() => {
     if (!selectedSession) return;
@@ -262,9 +302,12 @@ export default function CourtsPage({ envFilter = 'prod' }: { envFilter?: Environ
       .on('postgres_changes', { event: '*', schema: 'public', table: 'match_team_players' }, () => loadData(selectedSession))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'court_queues' }, () => loadData(selectedSession))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'courts' }, () => loadData(selectedSession))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'competition_fixtures' }, () => loadData(selectedSession))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'competition_fixture_players' }, () => loadData(selectedSession))
       .subscribe((status) => setLive(status === 'SUBSCRIBED'));
 
-    return () => { supabase.removeChannel(channel); };
+    const poll = setInterval(() => loadData(selectedSession), 30000);
+    return () => { clearInterval(poll); supabase.removeChannel(channel); };
   }, [selectedSession, loadData]);
 
   const inUse = courtViews.filter((cv) => cv.court.status === 'in_use').length;
@@ -272,8 +315,11 @@ export default function CourtsPage({ envFilter = 'prod' }: { envFilter?: Environ
     return sum + (cv.match ? cv.match.teams.reduce((s, t) => s + (t.players?.length || 0), 0) : 0);
   }, 0);
   const totalWaiting = courtViews.reduce((sum, cv) => sum + cv.waiting.length + cv.resting.length, 0);
-  const selectedSessionTitle = sessions.find((s) => s.id === selectedSession)?.title || '';
-  const playerNextGame = getPlayerNextGame(user?.id, courtViews, playerGameCounts);
+  const scheduledFixtures = courtViews.reduce((sum, cv) => sum + cv.fixtures.length, 0);
+  const selectedSessionRecord = sessions.find((s) => s.id === selectedSession);
+  const isChallenge = selectedSessionRecord?.session_type === 'group_challenge';
+  const selectedSessionTitle = selectedSessionRecord?.title || '';
+  const playerNextGame = getPlayerNextGame(user?.id, courtViews, playerGameCounts, isChallenge);
   const nextUpItems = getNextUpItems(courtViews);
 
   if (loading) {
@@ -337,7 +383,7 @@ export default function CourtsPage({ envFilter = 'prod' }: { envFilter?: Environ
             <StatCard label="Courts" value={courtViews.length} color="text-gray-900" />
             <StatCard label="In Play" value={inUse} color="text-emerald-600" bg="bg-emerald-50 border-emerald-200" />
             <StatCard label="Playing" value={totalPlaying} color="text-sky-600" bg="bg-sky-50 border-sky-200" />
-            <StatCard label="Waiting" value={totalWaiting} color="text-amber-600" bg="bg-amber-50 border-amber-200" />
+            <StatCard label={isChallenge ? 'Scheduled' : 'Waiting'} value={isChallenge ? scheduledFixtures : totalWaiting} color="text-amber-600" bg="bg-amber-50 border-amber-200" />
           </div>
 
           {playerNextGame && (
@@ -528,7 +574,8 @@ function NextUpBoard({ items }: { items: NextUpItem[] }) {
 }
 
 function CourtCard({ cv }: { cv: CourtView }) {
-  const { court, match, waiting, resting } = cv;
+  const { court, match, waiting, resting, fixtures, teamNames } = cv;
+  const nextFixture = fixtures[0];
   const teamA = match?.teams?.find((t) => t.team_label === 'A');
   const teamB = match?.teams?.find((t) => t.team_label === 'B');
   const [elapsed, setElapsed] = useState(
@@ -552,9 +599,9 @@ function CourtCard({ cv }: { cv: CourtView }) {
         <div>
           <h2 className="text-gray-900 font-bold text-xl">{court.name}</h2>
           <div className="flex items-center gap-2 mt-0.5">
-            <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-emerald-500 animate-pulse' : court.status === 'available' ? 'bg-gray-400' : 'bg-red-400'}`} />
-            <span className={`text-xs font-medium ${isActive ? 'text-emerald-600' : court.status === 'available' ? 'text-gray-400' : 'text-red-500'}`}>
-              {isActive ? 'In Play' : court.status === 'available' ? 'Available' : 'Maintenance'}
+            <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-emerald-500 animate-pulse' : court.status === 'maintenance' ? 'bg-red-400' : nextFixture ? 'bg-amber-500' : 'bg-gray-400'}`} />
+            <span className={`text-xs font-medium ${isActive ? 'text-emerald-600' : court.status === 'maintenance' ? 'text-red-500' : nextFixture ? 'text-amber-600' : 'text-gray-400'}`}>
+              {isActive ? 'In Play' : court.status === 'maintenance' ? 'Maintenance' : nextFixture ? 'Scheduled' : 'Available'}
             </span>
           </div>
         </div>
@@ -627,6 +674,24 @@ function CourtCard({ cv }: { cv: CourtView }) {
               </div>
             )}
           </>
+        ) : nextFixture ? (
+          <div>
+            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wider mb-2">Next scheduled match</p>
+            <p className="text-xs text-gray-500 mb-3">
+              Round {nextFixture.round_number} · Wave {nextFixture.wave_number} · {new Date(nextFixture.scheduled_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+            </p>
+            <div className="space-y-2">
+              {(['A', 'B'] as const).map((side) => (
+                <div key={side} className={`rounded-2xl border p-3 ${side === 'A' ? 'bg-sky-50 border-sky-200' : 'bg-rose-50 border-rose-200'}`}>
+                  <p className={`text-xs font-bold mb-1 ${side === 'A' ? 'text-sky-700' : 'text-rose-700'}`}>{teamNames[side]}</p>
+                  <p className="text-sm text-gray-900 font-medium">
+                    {nextFixture.players?.filter((player) => player.side === side).sort((a, b) => a.team_position - b.team_position).map((player) => player.profile?.full_name || 'Player').join(' & ') || 'Players to be assigned'}
+                  </p>
+                </div>
+              ))}
+            </div>
+            {fixtures.length > 1 && <p className="text-xs text-gray-500 mt-3">+{fixtures.length - 1} more scheduled on this court</p>}
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-10 text-gray-300">
             <div className="w-12 h-12 rounded-2xl border-2 border-dashed border-gray-200 flex items-center justify-center mb-3">

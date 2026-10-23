@@ -76,6 +76,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
   const editRosterRef = useRef<HTMLElement>(null);
   const [editRosterA, setEditRosterA] = useState<string[]>([]);
   const [editRosterB, setEditRosterB] = useState<string[]>([]);
+  const [editCourtCount, setEditCourtCount] = useState(1);
   const [extraForm, setExtraForm] = useState(emptyExtraForm);
 
   const loadData = useCallback(async () => {
@@ -480,6 +481,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
     const sideB = selected.groups.find((row) => row.side === 'B');
     setEditRosterA(selected.rosters.filter((row) => row.competition_group_id === sideA?.id).sort((a, b) => a.seed_number - b.seed_number).map((row) => row.player_id));
     setEditRosterB(selected.rosters.filter((row) => row.competition_group_id === sideB?.id).sort((a, b) => a.seed_number - b.seed_number).map((row) => row.player_id));
+    setEditCourtCount(selected.court_count);
     setError('');
     setShowEditRoster(true);
   }
@@ -514,17 +516,21 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
     if (editRosterA.length < 2 || editRosterA.length !== editRosterB.length) {
       setError('Both teams need the same number of players, with at least two on each team.'); return;
     }
+    if (!Number.isInteger(editCourtCount) || editCourtCount < selected.court_count || editCourtCount > 32) {
+      setError(`Choose between ${selected.court_count} and 32 courts. Existing courts cannot be removed here.`); return;
+    }
     const ids = [...editRosterA, ...editRosterB];
     if (new Set(ids).size !== ids.length || ids.some((id) => !playerById.has(id))) {
       setError('Each available player can appear on only one team.'); return;
     }
-    const schedule = generateSeededChallengeSchedule(editRosterA.length, selected.court_count, selected.fixture_minutes, selected.event_date, selected.start_time);
-    if (!confirm(`Save both rosters and recreate ${schedule.totalFixtures} pending matches?`)) return;
+    const schedule = generateSeededChallengeSchedule(editRosterA.length, editCourtCount, selected.fixture_minutes, selected.event_date, selected.start_time);
+    if (!confirm(`Save ${editCourtCount} courts and both rosters, then recreate ${schedule.totalFixtures} pending matches?`)) return;
     setSaving(true);
     setError('');
     try {
-      const { error: rosterError } = await supabase.rpc('replace_challenge_rosters', {
+      const { error: rosterError } = await supabase.rpc('replace_challenge_schedule', {
         target_competition_id: selected.id,
+        target_court_count: editCourtCount,
         player_ids_a: editRosterA,
         player_ids_b: editRosterB,
         fixture_schedule: schedule.fixtures.map((fixture) => ({
@@ -601,12 +607,16 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
 
       {showEditRoster && selected && (
         <section ref={editRosterRef} className="bg-white border border-emerald-200 rounded-2xl p-4 sm:p-5 space-y-4 scroll-mt-4">
-          <div className="flex items-start justify-between gap-3"><div><h2 className="font-bold text-gray-900">Edit teams and seeds</h2><p className="text-xs text-gray-500 mt-1">Replace players or use the arrows to change seed order. Saving recreates the pending schedule.</p></div><button onClick={() => setShowEditRoster(false)} aria-label="Close roster editor" className="p-2 text-gray-400"><X className="w-5 h-5" /></button></div>
+          <div className="flex items-start justify-between gap-3"><div><h2 className="font-bold text-gray-900">Edit challenge schedule</h2><p className="text-xs text-gray-500 mt-1">Add courts, replace players, or change seed order. Saving recreates the pending schedule.</p></div><button onClick={() => setShowEditRoster(false)} aria-label="Close roster editor" className="p-2 text-gray-400"><X className="w-5 h-5" /></button></div>
+          <label className="block max-w-48 text-xs font-semibold text-gray-600">Courts
+            <input type="number" min={selected.court_count} max="32" step="1" value={editCourtCount} onChange={(event) => setEditCourtCount(Number(event.target.value))} className="block w-full mt-1 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-900" />
+          </label>
+          <p className="text-xs text-gray-500">Currently {selected.court_count} courts. Adding a court reschedules all pending fixtures across the new court count.</p>
           <div className="grid lg:grid-cols-2 gap-4">
             <TeamRosterEditor side="A" groups={groups} players={playerChoices} roster={editRosterA} otherRoster={editRosterB} teamName={sideName(selectedSideA, 'Team A')} onTeamName={() => {}} nameEditable={false} onToggle={(id) => toggleEditRoster('A', id)} onMove={(index, direction) => moveEditSeed('A', index, direction)} />
             <TeamRosterEditor side="B" groups={groups} players={playerChoices} roster={editRosterB} otherRoster={editRosterA} teamName={sideName(selectedSideB, 'Team B')} onTeamName={() => {}} nameEditable={false} onToggle={(id) => toggleEditRoster('B', id)} onMove={(index, direction) => moveEditSeed('B', index, direction)} />
           </div>
-          <div className="flex items-center justify-between gap-3 flex-wrap"><p className="text-xs text-gray-500">Both teams need equal rosters. Completed results cannot be changed here.</p><button onClick={saveEditedRoster} disabled={saving || editRosterA.length < 2 || editRosterA.length !== editRosterB.length} className="bg-emerald-500 disabled:opacity-40 text-white px-4 py-2.5 rounded-xl text-sm font-semibold">{saving ? 'Saving...' : 'Save teams & recreate schedule'}</button></div>
+          <div className="flex items-center justify-between gap-3 flex-wrap"><p className="text-xs text-gray-500">Both teams need equal rosters. Completed results cannot be changed here.</p><button onClick={saveEditedRoster} disabled={saving || editRosterA.length < 2 || editRosterA.length !== editRosterB.length || !Number.isInteger(editCourtCount) || editCourtCount < selected.court_count || editCourtCount > 32} className="bg-emerald-500 disabled:opacity-40 text-white px-4 py-2.5 rounded-xl text-sm font-semibold">{saving ? 'Saving...' : 'Save & recreate schedule'}</button></div>
         </section>
       )}
 
@@ -623,7 +633,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
           {!selected ? <div className="bg-white border border-dashed border-gray-200 rounded-2xl p-12 text-center"><Swords className="w-10 h-10 text-gray-300 mx-auto mb-3" /><p className="text-gray-500">Select a challenge to see its fixtures.</p></div> : (
             <div className="space-y-4">
               <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
-                <div className="p-4 sm:p-5 bg-emerald-50 border-b border-emerald-100"><div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3"><div><div className="flex items-center gap-2 flex-wrap"><h2 className="text-xl font-bold text-gray-900">{selected.title}</h2>{isOrganiser && <span className="inline-flex items-center gap-1 bg-white border border-emerald-200 text-emerald-700 px-2 py-1 rounded-lg text-xs"><ShieldCheck className="w-3.5 h-3.5" />Organiser</span>}{!selected.counts_for_rankings && <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-lg text-xs">Exhibition</span>}</div><div className="flex flex-wrap gap-3 text-xs text-gray-500 mt-2"><span className="flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" />{selected.event_date}</span><span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{selected.start_time.slice(0, 5)}</span><span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{selected.venue}</span></div></div><div className="flex items-center gap-2 flex-wrap"><span className="bg-white border border-emerald-200 px-3 py-2 rounded-xl text-sm font-semibold text-emerald-700">{leaderLabel()}</span>{isOrganiser && standings.completed === 0 && <button onClick={openRosterEditor} disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-xl text-xs font-semibold disabled:opacity-40"><RefreshCw className="w-3.5 h-3.5" />Edit teams & seeds</button>}</div></div></div>
+                <div className="p-4 sm:p-5 bg-emerald-50 border-b border-emerald-100"><div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3"><div><div className="flex items-center gap-2 flex-wrap"><h2 className="text-xl font-bold text-gray-900">{selected.title}</h2>{isOrganiser && <span className="inline-flex items-center gap-1 bg-white border border-emerald-200 text-emerald-700 px-2 py-1 rounded-lg text-xs"><ShieldCheck className="w-3.5 h-3.5" />Organiser</span>}{!selected.counts_for_rankings && <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-lg text-xs">Exhibition</span>}</div><div className="flex flex-wrap gap-3 text-xs text-gray-500 mt-2"><span className="flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" />{selected.event_date}</span><span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{selected.start_time.slice(0, 5)}</span><span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{selected.venue}</span></div></div><div className="flex items-center gap-2 flex-wrap"><span className="bg-white border border-emerald-200 px-3 py-2 rounded-xl text-sm font-semibold text-emerald-700">{leaderLabel()}</span>{isOrganiser && standings.completed === 0 && <button onClick={openRosterEditor} disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-xl text-xs font-semibold disabled:opacity-40"><RefreshCw className="w-3.5 h-3.5" />Edit schedule</button>}</div></div></div>
                 <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 p-4 sm:p-6"><div className="text-center min-w-0"><p className="font-bold text-gray-900 break-words">{sideName(selectedSideA, 'Team A')}</p><p className="text-3xl font-bold text-sky-600 mt-2">{standings.winsA}</p><p className="text-xs text-gray-400">fixture wins · {standings.pointsA - standings.pointsB >= 0 ? '+' : ''}{standings.pointsA - standings.pointsB} diff</p></div><div className="text-gray-300 font-bold">vs</div><div className="text-center min-w-0"><p className="font-bold text-gray-900 break-words">{sideName(selectedSideB, 'Team B')}</p><p className="text-3xl font-bold text-rose-600 mt-2">{standings.winsB}</p><p className="text-xs text-gray-400">fixture wins · {standings.pointsB - standings.pointsA >= 0 ? '+' : ''}{standings.pointsB - standings.pointsA} diff</p></div></div>
                 <div className="grid grid-cols-3 border-t border-gray-100 text-center text-xs"><div className="p-3"><b className="block text-gray-900 text-base">{standings.completed}</b><span className="text-gray-400">Completed</span></div><div className="p-3 border-x border-gray-100"><b className="block text-gray-900 text-base">{selected.fixtures.length - standings.completed}</b><span className="text-gray-400">Remaining</span></div><div className="p-3"><b className="block text-gray-900 text-base">{regularRoundCount}</b><span className="text-gray-400">Rounds{extraMatchCount > 0 ? ` + ${extraMatchCount} extra` : ''}</span></div></div>
               </section>

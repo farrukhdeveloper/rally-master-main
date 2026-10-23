@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  CalendarDays, Check, Clock, MapPin,
+  ArrowDown, ArrowUp, CalendarDays, Check, Clock, MapPin,
   Plus, RefreshCw, ShieldCheck, Swords, Trash2, Trophy, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -57,6 +57,7 @@ function dateTimeLocalValue(date: Date) {
 export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?: Environment }) {
   const { user, isAdmin, isSuperAdmin } = useAuth();
   const [groups, setGroups] = useState<GroupWithMembers[]>([]);
+  const [availablePlayers, setAvailablePlayers] = useState<Profile[]>([]);
   const [challenges, setChallenges] = useState<ChallengeDetails[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -71,15 +72,20 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
   const [scoreA, setScoreA] = useState('');
   const [scoreB, setScoreB] = useState('');
   const [showExtraMatch, setShowExtraMatch] = useState(false);
+  const [showEditRoster, setShowEditRoster] = useState(false);
+  const [editRosterA, setEditRosterA] = useState<string[]>([]);
+  const [editRosterB, setEditRosterB] = useState<string[]>([]);
   const [extraForm, setExtraForm] = useState(emptyExtraForm);
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [{ data: groupRows }, { data: membershipRows }, { data: competitionRows }] = await Promise.all([
+    const [{ data: groupRows }, { data: membershipRows }, { data: competitionRows }, { data: profileRows }] = await Promise.all([
       supabase.from('groups').select('*').eq('environment', envFilter).order('name'),
       supabase.from('player_groups').select('group_id, profile:profiles(*)'),
       supabase.from('competitions').select('*').eq('environment', envFilter).eq('competition_type', 'group_challenge').order('event_date', { ascending: false }),
+      supabase.from('profiles').select('*').eq('environment', envFilter).order('full_name'),
     ]);
+    setAvailablePlayers((profileRows as Profile[]) || []);
 
     const membersByGroup = new Map<string, Profile[]>();
     for (const row of (membershipRows as any[]) || []) {
@@ -123,6 +129,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
   const selected = challenges.find((challenge) => challenge.id === selectedId) || null;
   const playerChoices = useMemo(() => {
     const choices = new Map<string, PlayerChoice>();
+    for (const profile of availablePlayers) choices.set(profile.id, { profile, groupIds: [], groupNames: [] });
     for (const group of groups) for (const profile of group.members) {
       const choice = choices.get(profile.id) || { profile, groupIds: [], groupNames: [] };
       choice.groupIds.push(group.id);
@@ -130,7 +137,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
       choices.set(profile.id, choice);
     }
     return [...choices.values()].sort((a, b) => a.profile.full_name.localeCompare(b.profile.full_name));
-  }, [groups]);
+  }, [groups, availablePlayers]);
   const playerById = useMemo(() => new Map(playerChoices.map((choice) => [choice.profile.id, choice.profile])), [playerChoices]);
   const preview = useMemo(() => {
     if (rosterA.length < 2 || rosterA.length !== rosterB.length || !form.eventDate || !form.startTime) return null;
@@ -153,7 +160,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
       setError('Each player can belong to only one side of this challenge.'); return;
     }
     if ([...rosterA, ...rosterB].some((id) => !playerById.has(id))) {
-      setError('Select players from the available groups.'); return;
+      setError('Select players from the available player list.'); return;
     }
     if (rosterA.length < 2 || rosterA.length !== rosterB.length) {
       setError('Both teams need the same number of seeded players, with at least two per team.'); return;
@@ -455,76 +462,65 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
     setSaving(false);
   }
 
-  async function regenerateSchedule() {
+  function openRosterEditor() {
     if (!selected || !isOrganiser || selected.fixtures.some((fixture) => fixture.status === 'completed')) return;
     const sideA = selected.groups.find((row) => row.side === 'A');
     const sideB = selected.groups.find((row) => row.side === 'B');
-    const seededA = selected.rosters
-      .filter((row) => row.competition_group_id === sideA?.id)
-      .sort((a, b) => a.seed_number - b.seed_number);
-    const seededB = selected.rosters
-      .filter((row) => row.competition_group_id === sideB?.id)
-      .sort((a, b) => a.seed_number - b.seed_number);
+    setEditRosterA(selected.rosters.filter((row) => row.competition_group_id === sideA?.id).sort((a, b) => a.seed_number - b.seed_number).map((row) => row.player_id));
+    setEditRosterB(selected.rosters.filter((row) => row.competition_group_id === sideB?.id).sort((a, b) => a.seed_number - b.seed_number).map((row) => row.player_id));
+    setError('');
+    setShowEditRoster(true);
+  }
 
-    if (!sideA || !sideB || seededA.length < 2 || seededA.length !== seededB.length) {
-      setError('The challenge needs equal, seeded rosters before its schedule can be regenerated.');
-      return;
+  function toggleEditRoster(side: TeamLabel, id: string) {
+    const other = side === 'A' ? editRosterB : editRosterA;
+    if (other.includes(id)) return;
+    const update = side === 'A' ? setEditRosterA : setEditRosterB;
+    update((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  }
+
+  function moveEditSeed(side: TeamLabel, index: number, direction: -1 | 1) {
+    const update = side === 'A' ? setEditRosterA : setEditRosterB;
+    update((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  async function saveEditedRoster() {
+    if (!selected || !isOrganiser) return;
+    if (selected.fixtures.some((fixture) => fixture.status === 'completed')) {
+      setError('Player changes are locked once a match result has been recorded.'); return;
     }
-
-    const schedule = generateSeededChallengeSchedule(
-      seededA.length,
-      selected.court_count,
-      selected.fixture_minutes,
-      selected.event_date,
-      selected.start_time,
-    );
-
-    if (!confirm(`Regenerate all ${schedule.totalFixtures} pending fixtures?`)) return;
+    if (editRosterA.length < 2 || editRosterA.length !== editRosterB.length) {
+      setError('Both teams need the same number of players, with at least two on each team.'); return;
+    }
+    const ids = [...editRosterA, ...editRosterB];
+    if (new Set(ids).size !== ids.length || ids.some((id) => !playerById.has(id))) {
+      setError('Each available player can appear on only one team.'); return;
+    }
+    const schedule = generateSeededChallengeSchedule(editRosterA.length, selected.court_count, selected.fixture_minutes, selected.event_date, selected.start_time);
+    if (!confirm(`Save both rosters and recreate ${schedule.totalFixtures} pending matches?`)) return;
     setSaving(true);
     setError('');
-
     try {
-      const { error: deleteError } = await supabase
-        .from('competition_fixtures')
-        .delete()
-        .eq('competition_id', selected.id);
-      if (deleteError) throw deleteError;
-
-      const { data: fixtures, error: fixtureError } = await supabase
-        .from('competition_fixtures')
-        .insert(schedule.fixtures.map((fixture) => ({
-          competition_id: selected.id,
-          round_number: fixture.roundNumber,
-          wave_number: fixture.waveNumber,
-          court_number: fixture.courtNumber,
-          scheduled_at: fixture.scheduledAt,
-          status: 'scheduled',
-        })))
-        .select();
-      if (fixtureError || !fixtures) throw fixtureError || new Error('Could not regenerate fixtures.');
-
-      const playerRows: Array<{
-        fixture_id: string;
-        side: TeamLabel;
-        player_id: string;
-        seed_number: number;
-        team_position: 1 | 2;
-      }> = [];
-      fixtures.forEach((fixture, index) => {
-        const [firstSeed, secondSeed] = schedule.fixtures[index].seeds;
-        playerRows.push(
-          { fixture_id: fixture.id, side: 'A', player_id: seededA[firstSeed - 1].player_id, seed_number: firstSeed, team_position: 1 },
-          { fixture_id: fixture.id, side: 'A', player_id: seededA[secondSeed - 1].player_id, seed_number: secondSeed, team_position: 2 },
-          { fixture_id: fixture.id, side: 'B', player_id: seededB[firstSeed - 1].player_id, seed_number: firstSeed, team_position: 1 },
-          { fixture_id: fixture.id, side: 'B', player_id: seededB[secondSeed - 1].player_id, seed_number: secondSeed, team_position: 2 },
-        );
+      const { error: rosterError } = await supabase.rpc('replace_challenge_rosters', {
+        target_competition_id: selected.id,
+        player_ids_a: editRosterA,
+        player_ids_b: editRosterB,
+        fixture_schedule: schedule.fixtures.map((fixture) => ({
+          round_number: fixture.roundNumber, wave_number: fixture.waveNumber,
+          court_number: fixture.courtNumber, scheduled_at: fixture.scheduledAt, seeds: fixture.seeds,
+        })),
       });
-
-      const { error: playerError } = await supabase.from('competition_fixture_players').insert(playerRows);
-      if (playerError) throw playerError;
+      if (rosterError) throw rosterError;
+      setShowEditRoster(false);
       await loadData();
     } catch (caught: unknown) {
-      setError(caught instanceof Error ? caught.message : 'Schedule regeneration failed.');
+      setError(caught instanceof Error ? caught.message : 'Could not save rosters and schedule.');
     } finally {
       setSaving(false);
     }
@@ -556,7 +552,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
 
       {showCreate && (
         <section className="bg-white border border-emerald-200 rounded-2xl p-4 sm:p-5 space-y-5">
-          <div className="flex items-center justify-between"><div><h2 className="font-bold text-gray-900">Create Seeded Challenge</h2><p className="text-xs text-gray-500 mt-1">Name your teams and add players from any group. Selection order sets seeds; partners rotate against matching seeds on the other team.</p></div><button onClick={() => setShowCreate(false)} className="p-2 text-gray-400 hover:text-gray-800"><X className="w-5 h-5" /></button></div>
+          <div className="flex items-center justify-between"><div><h2 className="font-bold text-gray-900">Create Seeded Challenge</h2><p className="text-xs text-gray-500 mt-1">Name your teams and add any available players, including players without a group. Selection order sets seeds.</p></div><button onClick={() => setShowCreate(false)} className="p-2 text-gray-400 hover:text-gray-800"><X className="w-5 h-5" /></button></div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Challenge name (optional)" className="lg:col-span-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
             <input type="date" value={form.eventDate} onChange={(e) => setForm({ ...form, eventDate: e.target.value })} className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
@@ -584,6 +580,17 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
             </div>
             <div className="flex items-center gap-3"><span className="text-xs text-gray-500">Completed matches count toward overall rankings.</span><button onClick={createChallenge} disabled={saving || !preview} className="bg-emerald-500 disabled:opacity-40 text-white px-5 py-2.5 rounded-xl text-sm font-semibold">{saving ? 'Creating...' : 'Create & Schedule'}</button></div>
           </div>
+        </section>
+      )}
+
+      {showEditRoster && selected && (
+        <section className="bg-white border border-emerald-200 rounded-2xl p-4 sm:p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3"><div><h2 className="font-bold text-gray-900">Edit teams and seeds</h2><p className="text-xs text-gray-500 mt-1">Replace players or use the arrows to change seed order. Saving recreates the pending schedule.</p></div><button onClick={() => setShowEditRoster(false)} aria-label="Close roster editor" className="p-2 text-gray-400"><X className="w-5 h-5" /></button></div>
+          <div className="grid lg:grid-cols-2 gap-4">
+            <TeamRosterEditor side="A" groups={groups} players={playerChoices} roster={editRosterA} otherRoster={editRosterB} teamName={sideName(selectedSideA, 'Team A')} onTeamName={() => {}} nameEditable={false} onToggle={(id) => toggleEditRoster('A', id)} onMove={(index, direction) => moveEditSeed('A', index, direction)} />
+            <TeamRosterEditor side="B" groups={groups} players={playerChoices} roster={editRosterB} otherRoster={editRosterA} teamName={sideName(selectedSideB, 'Team B')} onTeamName={() => {}} nameEditable={false} onToggle={(id) => toggleEditRoster('B', id)} onMove={(index, direction) => moveEditSeed('B', index, direction)} />
+          </div>
+          <div className="flex items-center justify-between gap-3 flex-wrap"><p className="text-xs text-gray-500">Both teams need equal rosters. Completed results cannot be changed here.</p><button onClick={saveEditedRoster} disabled={saving || editRosterA.length < 2 || editRosterA.length !== editRosterB.length} className="bg-emerald-500 disabled:opacity-40 text-white px-4 py-2.5 rounded-xl text-sm font-semibold">{saving ? 'Saving...' : 'Save teams & recreate schedule'}</button></div>
         </section>
       )}
 
@@ -629,11 +636,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
                     <button onClick={openExtraMatch} disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-500 text-white rounded-lg text-xs font-semibold disabled:opacity-40">
                       <Plus className="w-3.5 h-3.5" />Extra Match
                     </button>
-                    {standings.completed === 0 && (
-                      <button onClick={regenerateSchedule} disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 text-gray-600 hover:border-emerald-300 rounded-lg text-xs font-semibold disabled:opacity-40">
-                        <RefreshCw className="w-3.5 h-3.5" />Regenerate schedule
-                      </button>
-                    )}
+                    {standings.completed === 0 && <button onClick={openRosterEditor} disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 text-gray-600 hover:border-emerald-300 rounded-lg text-xs font-semibold disabled:opacity-40"><RefreshCw className="w-3.5 h-3.5" />Edit teams & seeds</button>}
                     <button onClick={deleteChallenge} disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 rounded-lg text-xs font-semibold disabled:opacity-40">
                       <Trash2 className="w-3.5 h-3.5" />Delete whole challenge
                     </button>
@@ -653,9 +656,10 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
   );
 }
 
-function TeamRosterEditor({ side, groups, players, roster, onToggle, otherRoster, teamName, onTeamName }: {
+function TeamRosterEditor({ side, groups, players, roster, onToggle, otherRoster, teamName, onTeamName, onMove, nameEditable = true }: {
   side: TeamLabel; groups: GroupWithMembers[]; players: PlayerChoice[]; roster: string[];
   onToggle: (id: string) => void; otherRoster: string[]; teamName: string; onTeamName: (value: string) => void;
+  onMove?: (index: number, direction: -1 | 1) => void; nameEditable?: boolean;
 }) {
   const [showPicker, setShowPicker] = useState(false);
   const [search, setSearch] = useState('');
@@ -663,23 +667,23 @@ function TeamRosterEditor({ side, groups, players, roster, onToggle, otherRoster
   const label = teamName.trim() || (side === 'A' ? 'Team 1' : 'Team 2');
   const playerById = new Map(players.map((choice) => [choice.profile.id, choice.profile]));
   const visiblePlayers = players.filter((choice) => !otherRoster.includes(choice.profile.id)
-    && (!groupFilter || choice.groupIds.includes(groupFilter))
-    && `${choice.profile.full_name} ${choice.groupNames.join(' ')}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+    && (!groupFilter || (groupFilter === 'ungrouped' ? choice.groupIds.length === 0 : choice.groupIds.includes(groupFilter)))
+    && `${choice.profile.full_name} ${choice.groupNames.join(' ')} ${choice.groupNames.length ? '' : 'no group'}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
 
   return (
     <div className={`border rounded-2xl p-4 ${side === 'A' ? 'border-sky-200 bg-sky-50' : 'border-rose-200 bg-rose-50'}`}>
-      <label className="block text-xs font-semibold text-gray-500" htmlFor={`challenge-team-${side}`}>{side === 'A' ? 'First team name' : 'Second team name'}</label>
-      <input id={`challenge-team-${side}`} value={teamName} onChange={(event) => onTeamName(event.target.value)} placeholder={side === 'A' ? 'e.g. Strikers' : 'e.g. Smashers'} className="w-full mt-1 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
+      {nameEditable ? <><label className="block text-xs font-semibold text-gray-500" htmlFor={`challenge-team-${side}`}>{side === 'A' ? 'First team name' : 'Second team name'}</label><input id={`challenge-team-${side}`} value={teamName} onChange={(event) => onTeamName(event.target.value)} placeholder={side === 'A' ? 'e.g. Strikers' : 'e.g. Smashers'} className="w-full mt-1 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm" /></> : <p className="font-semibold text-gray-900">{label}</p>}
       <div className="flex items-center justify-between gap-2 mt-4">
         <p className="text-sm font-semibold text-gray-800">{roster.length} players selected</p>
         <button type="button" onClick={() => setShowPicker(true)} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-white border border-gray-200 text-emerald-700 text-sm font-semibold"><Plus className="w-4 h-4" />Add players</button>
       </div>
-      <p className="text-xs text-gray-500 mt-2">First selected is seed #1, second is #2. Choose players from any group.</p>
+      <p className="text-xs text-gray-500 mt-2">Selection order sets seeds. Players without a group are available too.</p>
       {roster.length === 0 ? <p className="text-sm text-gray-400 py-6 text-center">Add players to build {label}.</p> : (
         <ol className="space-y-1.5 mt-3 max-h-72 overflow-y-auto">
           {roster.map((id, index) => <li key={id} className="bg-white border border-gray-100 rounded-xl p-2 flex items-center gap-2">
             <span className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold">#{index + 1}</span>
             <span className="flex-1 text-sm font-medium text-gray-900 break-words">{playerName(playerById.get(id))}</span>
+            {onMove && <><button type="button" onClick={() => onMove(index, -1)} disabled={index === 0} aria-label={`Move ${playerName(playerById.get(id))} seed up`} className="p-1 text-gray-500 disabled:opacity-30"><ArrowUp className="w-4 h-4" /></button><button type="button" onClick={() => onMove(index, 1)} disabled={index === roster.length - 1} aria-label={`Move ${playerName(playerById.get(id))} seed down`} className="p-1 text-gray-500 disabled:opacity-30"><ArrowDown className="w-4 h-4" /></button></>}
             <button type="button" onClick={() => onToggle(id)} aria-label={`Remove ${playerName(playerById.get(id))} from ${label}`} className="p-1 text-red-400"><X className="w-4 h-4" /></button>
           </li>)}
         </ol>
@@ -687,23 +691,23 @@ function TeamRosterEditor({ side, groups, players, roster, onToggle, otherRoster
       {showPicker && <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3 sm:p-6" onKeyDown={(event) => { if (event.key === 'Escape') setShowPicker(false); }}>
         <section role="dialog" aria-modal="true" aria-label={`Choose players for ${label}`} className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
           <header className="p-4 border-b border-gray-100 flex items-center justify-between gap-3">
-            <div><h3 className="font-bold text-gray-900">Add players to {label}</h3><p className="text-xs text-gray-500 mt-1">Search across all groups. Each selection receives the next seed.</p></div>
+            <div><h3 className="font-bold text-gray-900">Add players to {label}</h3><p className="text-xs text-gray-500 mt-1">Search all players, including those without a group. Each selection receives the next seed.</p></div>
             <button type="button" onClick={() => setShowPicker(false)} aria-label="Close player picker" className="p-2 text-gray-400"><X className="w-5 h-5" /></button>
           </header>
           <div className="p-4 grid sm:grid-cols-2 gap-3 border-b border-gray-100">
             <input autoFocus aria-label="Search players" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by player name or group..." className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm" />
             <select aria-label="Filter players by group" value={groupFilter} onChange={(event) => setGroupFilter(event.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm">
-              <option value="">All groups</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+              <option value="">All players</option><option value="ungrouped">No group</option>{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
             </select>
           </div>
           <div className="overflow-y-auto min-h-0 p-4 space-y-2">
             <p className="text-xs text-gray-500">{visiblePlayers.length} matching players. Players on the other team are excluded.</p>
-            {visiblePlayers.length === 0 && <p className="py-6 text-center text-gray-400">No players match. Try another name or select All groups.</p>}
+            {visiblePlayers.length === 0 && <p className="py-6 text-center text-gray-400">No players match. Try another name or select All players.</p>}
             {visiblePlayers.map((choice) => {
               const seedIndex = roster.indexOf(choice.profile.id);
               return <label key={choice.profile.id} className={`flex items-center gap-3 rounded-xl border p-3 cursor-pointer ${seedIndex >= 0 ? 'bg-emerald-50 border-emerald-300' : 'border-gray-200 hover:bg-gray-50'}`}>
                 <input type="checkbox" checked={seedIndex >= 0} onChange={() => onToggle(choice.profile.id)} aria-label={`Select ${choice.profile.full_name}`} className="w-4 h-4 accent-emerald-600" />
-                <span className="flex-1 min-w-0"><span className="block font-medium text-sm text-gray-900 break-words">{choice.profile.full_name}</span><span className="block text-xs text-gray-500 break-words">{choice.groupNames.join(', ')}</span></span>
+                <span className="flex-1 min-w-0"><span className="block font-medium text-sm text-gray-900 break-words">{choice.profile.full_name}</span><span className="block text-xs text-gray-500 break-words">{choice.groupNames.join(', ') || 'No group'}</span></span>
                 <span className={`text-xs rounded px-2 py-1 ${seedIndex >= 0 ? 'bg-emerald-100 text-emerald-700 font-bold' : skillLevelColor(choice.profile.skill_level)}`}>{seedIndex >= 0 ? `Seed #${seedIndex + 1}` : skillLevelLabel(choice.profile.skill_level)}</span>
               </label>;
             })}

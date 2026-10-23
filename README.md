@@ -28,4 +28,13 @@ The recent challenge features use:
 
 Supabase Edge Function source is under `supabase/functions`. Deploy and configure those functions separately where needed.
 
+## Public-form protection
+
+1. Apply `supabase/migrations/20261023160000_contact_abuse_protection.sql` to the existing project. It stores contact requests, limits them to three per hour per visitor, and prevents players from changing protected profile fields through the API. Admins can read requests under **Admin Panel → Contact Requests** even if email delivery fails.
+2. Deploy the updated `notify-super-admin` Edge Function. It records contact requests before attempting email delivery and logs the provider's response when sending fails. Keep `RESEND_API_KEY` and `NOTIFICATION_FROM_EMAIL` in Supabase Edge Function secrets; never add them to Bolt or GitHub.
+3. Create a Cloudflare Turnstile widget for `rally-master.bolt.host`. Add its public site key as `VITE_TURNSTILE_SITE_KEY` in Bolt's project environment. Add its secret key as `TURNSTILE_SECRET_KEY` in Supabase Edge Function secrets. The public site key may be committed; the secret key must stay server-side. For Bolt Preview, also authorize its preview hostname in the widget or use Cloudflare's test keys in an isolated test environment.
+4. Once the site key is available in the app, enable **Turnstile CAPTCHA** under Supabase **Authentication → Bot and Abuse Protection** with the same secret key. Enable this last so login and signup remain usable during setup. Republish the app afterward.
+
+Supabase Auth's own [rate limits](https://supabase.com/docs/guides/auth/rate-limits) also apply to signup, sign-in, and password reset. The contact form uses a server-side limit because it is a separate public Edge Function.
+
 Credentials, dependencies, compiled builds, and archive backups are excluded from version control.

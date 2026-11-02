@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown, ArrowUp, CalendarDays, Check, Clock, MapPin,
-  Plus, RefreshCw, ShieldCheck, Swords, Trash2, Trophy, X,
+  Plus, RefreshCw, Search, ShieldCheck, Swords, Trash2, Trophy, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -68,6 +68,7 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [fixtureFilter, setFixtureFilter] = useState<'all' | 'scheduled' | 'completed'>('all');
+  const [fixtureSearch, setFixtureSearch] = useState('');
   const [resultFixture, setResultFixture] = useState<CompetitionFixture | null>(null);
   const [scoreA, setScoreA] = useState('');
   const [scoreB, setScoreB] = useState('');
@@ -558,10 +559,14 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
     (selected?.fixtures || []).filter((fixture) => !fixture.is_extra).map((fixture) => fixture.round_number),
   ).size;
   const extraMatchCount = (selected?.fixtures || []).filter((fixture) => fixture.is_extra).length;
+  const searchTerm = fixtureSearch.trim().toLocaleLowerCase();
   const visibleRounds = rounds.map((round) => ({
     round,
-    fixtures: (selected?.fixtures || []).filter((fixture) => fixture.round_number === round && (fixtureFilter === 'all' || fixture.status === fixtureFilter)),
+    fixtures: (selected?.fixtures || []).filter((fixture) => fixture.round_number === round
+      && (fixtureFilter === 'all' || fixture.status === fixtureFilter)
+      && (!searchTerm || (fixture.players || []).some((player) => playerName(player.profile).toLocaleLowerCase().includes(searchTerm)))),
   })).filter((entry) => entry.fixtures.length > 0);
+  const visibleFixtureCount = visibleRounds.reduce((count, entry) => count + entry.fixtures.length, 0);
 
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-5">
@@ -625,20 +630,20 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
           <div className="flex items-center justify-between px-1"><h2 className="font-semibold text-gray-900">Challenges</h2><button onClick={loadData} className="p-2 text-gray-400 hover:text-gray-800"><RefreshCw className="w-4 h-4" /></button></div>
           {loading ? <div className="h-28 bg-gray-200 animate-pulse rounded-xl" /> : challenges.length === 0 ? <div className="bg-white border border-dashed border-gray-200 rounded-xl p-6 text-center text-sm text-gray-400">No challenges yet.</div> : challenges.map((challenge) => {
             const a = sideName(challenge.groups.find((row) => row.side === 'A'), 'Team A'); const b = sideName(challenge.groups.find((row) => row.side === 'B'), 'Team B');
-            return <button key={challenge.id} onClick={() => { setSelectedId(challenge.id); setShowEditRoster(false); }} className={`w-full text-left p-3 rounded-xl border transition-all ${challenge.id === selectedId ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-gray-200 hover:border-gray-300'}`}><p className="font-semibold text-gray-900 break-words">{challenge.title}</p><p className="text-xs text-gray-500 mt-1 break-words">{a} vs {b}</p><p className="text-xs text-gray-400 mt-2">{challenge.event_date} · {challenge.status.replace('_', ' ')}</p></button>;
+            return <button key={challenge.id} onClick={() => { setSelectedId(challenge.id); setShowEditRoster(false); setFixtureSearch(''); setFixtureFilter('all'); }} className={`w-full text-left p-3 rounded-xl border transition-all ${challenge.id === selectedId ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-gray-200 hover:border-gray-300'}`}><p className="font-semibold text-gray-900 break-words">{challenge.title}</p><p className="text-xs text-gray-500 mt-1 break-words">{a} vs {b}</p><p className="text-xs text-gray-400 mt-2">{challenge.event_date} · {challenge.status.replace('_', ' ')}</p></button>;
           })}
         </aside>
 
         <main className="min-w-0">
           {!selected ? <div className="bg-white border border-dashed border-gray-200 rounded-2xl p-12 text-center"><Swords className="w-10 h-10 text-gray-300 mx-auto mb-3" /><p className="text-gray-500">Select a challenge to see its fixtures.</p></div> : (
-            <div className="space-y-4">
+            <div className="flex flex-col gap-4">
               <section className="bg-white border border-gray-200 rounded-2xl overflow-hidden">
                 <div className="p-4 sm:p-5 bg-emerald-50 border-b border-emerald-100"><div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3"><div><div className="flex items-center gap-2 flex-wrap"><h2 className="text-xl font-bold text-gray-900">{selected.title}</h2>{isOrganiser && <span className="inline-flex items-center gap-1 bg-white border border-emerald-200 text-emerald-700 px-2 py-1 rounded-lg text-xs"><ShieldCheck className="w-3.5 h-3.5" />Organiser</span>}{!selected.counts_for_rankings && <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-lg text-xs">Exhibition</span>}</div><div className="flex flex-wrap gap-3 text-xs text-gray-500 mt-2"><span className="flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" />{selected.event_date}</span><span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{selected.start_time.slice(0, 5)}</span><span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{selected.venue}</span></div></div><div className="flex items-center gap-2 flex-wrap"><span className="bg-white border border-emerald-200 px-3 py-2 rounded-xl text-sm font-semibold text-emerald-700">{leaderLabel()}</span>{isOrganiser && standings.completed === 0 && <button onClick={openRosterEditor} disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-xl text-xs font-semibold disabled:opacity-40"><RefreshCw className="w-3.5 h-3.5" />Edit schedule</button>}</div></div></div>
                 <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 p-4 sm:p-6"><div className="text-center min-w-0"><p className="font-bold text-gray-900 break-words">{sideName(selectedSideA, 'Team A')}</p><p className="text-3xl font-bold text-sky-600 mt-2">{standings.winsA}</p><p className="text-xs text-gray-400">fixture wins · {standings.pointsA - standings.pointsB >= 0 ? '+' : ''}{standings.pointsA - standings.pointsB} diff</p></div><div className="text-gray-300 font-bold">vs</div><div className="text-center min-w-0"><p className="font-bold text-gray-900 break-words">{sideName(selectedSideB, 'Team B')}</p><p className="text-3xl font-bold text-rose-600 mt-2">{standings.winsB}</p><p className="text-xs text-gray-400">fixture wins · {standings.pointsB - standings.pointsA >= 0 ? '+' : ''}{standings.pointsB - standings.pointsA} diff</p></div></div>
                 <div className="grid grid-cols-3 border-t border-gray-100 text-center text-xs"><div className="p-3"><b className="block text-gray-900 text-base">{standings.completed}</b><span className="text-gray-400">Completed</span></div><div className="p-3 border-x border-gray-100"><b className="block text-gray-900 text-base">{selected.fixtures.length - standings.completed}</b><span className="text-gray-400">Remaining</span></div><div className="p-3"><b className="block text-gray-900 text-base">{regularRoundCount}</b><span className="text-gray-400">Rounds{extraMatchCount > 0 ? ` + ${extraMatchCount} extra` : ''}</span></div></div>
               </section>
 
-              <section className="bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
+              <section className="order-3 bg-white border border-gray-200 rounded-2xl p-4 sm:p-5 space-y-5">
                 <div className="flex items-start justify-between gap-3 flex-wrap"><div><h3 className="font-bold text-gray-900">Challenge results</h3><p className="text-xs text-gray-500 mt-1">Player results include regular and extra matches. Completed matches also count toward overall rankings.</p></div>{topPerformer && <span className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs font-semibold text-amber-800">Top performer: {topPerformer.name} · {topPerformer.wins}/{topPerformer.played} wins</span>}</div>
                 <div className="grid sm:grid-cols-2 gap-3 text-sm">
                   {(['A', 'B'] as TeamLabel[]).map((side) => <div key={side} className={`rounded-xl p-3 border ${side === 'A' ? 'bg-sky-50 border-sky-100' : 'bg-rose-50 border-rose-100'}`}><p className="font-semibold text-gray-900">{side === 'A' ? sideName(selectedSideA, 'Team A') : sideName(selectedSideB, 'Team B')}</p><p className="mt-1 text-gray-600">{side === 'A' ? standings.winsA : standings.winsB} wins · {side === 'A' ? standings.pointsA : standings.pointsB} points · {side === 'A' ? standings.pointsA - standings.pointsB : standings.pointsB - standings.pointsA} point difference</p></div>)}
@@ -649,7 +654,13 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
                 {standings.completed === 0 && <p className="text-sm text-gray-400">Enter a match result to see team and individual progress.</p>}
               </section>
 
-              <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="order-1 bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Search className="w-4 h-4 text-gray-400 shrink-0" />
+                  <input type="search" aria-label="Search player matches" value={fixtureSearch} onChange={(event) => setFixtureSearch(event.target.value)} placeholder="Search a player to see their matches" className="min-w-0 flex-1 bg-transparent text-sm text-gray-900 placeholder:text-gray-400 outline-none" />
+                  {fixtureSearch && <button type="button" onClick={() => setFixtureSearch('')} aria-label="Clear player search" className="p-1 text-gray-400 hover:text-gray-700"><X className="w-4 h-4" /></button>}
+                </div>
+                <div className="flex items-center justify-between gap-3 flex-wrap border-t border-gray-100 pt-3">
                 <div className="flex gap-2 flex-wrap">
                   {(['all', 'scheduled', 'completed'] as const).map((value) => (
                     <button key={value} onClick={() => setFixtureFilter(value)} className={`px-3 py-2 rounded-lg text-xs font-semibold capitalize ${fixtureFilter === value ? 'bg-emerald-500 text-white' : 'bg-white border border-gray-200 text-gray-500'}`}>
@@ -667,9 +678,12 @@ export default function GroupChallengesPage({ envFilter = 'prod' }: { envFilter?
                     </button>
                   </div>
                 )}
+                <span className="text-xs text-gray-500">{visibleFixtureCount} {visibleFixtureCount === 1 ? 'match' : 'matches'} shown</span>
+                </div>
               </div>
 
-              {visibleRounds.map(({ round, fixtures }) => { const extraRound = fixtures.every((fixture) => fixture.is_extra); const roundFixtures = selected.fixtures.filter((fixture) => fixture.round_number === round && !fixture.is_extra); const playingIds = new Set(roundFixtures.flatMap((fixture) => (fixture.players || []).map((player) => player.player_id))); const restingA = selected.rosters.filter((roster) => roster.competition_group_id === selectedSideA?.id && !playingIds.has(roster.player_id)).sort((a, b) => a.seed_number - b.seed_number); const restingB = selected.rosters.filter((roster) => roster.competition_group_id === selectedSideB?.id && !playingIds.has(roster.player_id)).sort((a, b) => a.seed_number - b.seed_number); return <section key={round} className={`bg-white border rounded-2xl p-4 ${extraRound ? 'border-violet-200' : 'border-gray-200'}`}><h3 className="font-semibold text-gray-900 mb-3">{extraRound ? 'Extra Match' : `Round ${round}`}</h3>{!extraRound && (restingA.length > 0 || restingB.length > 0) && <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"><span className="font-semibold">Sitting out this round:</span> {restingA.length > 0 && <span>{sideName(selectedSideA, 'Team A')}: {restingA.map((player) => `#${player.seed_number} ${playerName(player.profile)}`).join(', ')}</span>}{restingA.length > 0 && restingB.length > 0 && <span className="mx-2">·</span>}{restingB.length > 0 && <span>{sideName(selectedSideB, 'Team B')}: {restingB.map((player) => `#${player.seed_number} ${playerName(player.profile)}`).join(', ')}</span>}</div>}<div className="grid xl:grid-cols-2 gap-3">{fixtures.map((fixture) => <FixtureCard key={fixture.id} fixture={fixture} groupA={sideName(selectedSideA, 'Team A')} groupB={sideName(selectedSideB, 'Team B')} canSubmit={isOrganiser || (isRosterPlayer && fixture.status === 'scheduled')} isOrganiser={isOrganiser} onResult={() => openResult(fixture)} onClear={() => clearResult(fixture)} onDelete={() => deleteFixture(fixture)} />)}</div></section>; })}
+              {visibleFixtureCount === 0 && <p className="order-2 rounded-xl border border-dashed border-gray-200 bg-white p-6 text-center text-sm text-gray-500">No matches found. Try another player name or select All.</p>}
+              {visibleRounds.map(({ round, fixtures }) => { const extraRound = fixtures.every((fixture) => fixture.is_extra); const roundFixtures = selected.fixtures.filter((fixture) => fixture.round_number === round && !fixture.is_extra); const playingIds = new Set(roundFixtures.flatMap((fixture) => (fixture.players || []).map((player) => player.player_id))); const restingA = selected.rosters.filter((roster) => roster.competition_group_id === selectedSideA?.id && !playingIds.has(roster.player_id)).sort((a, b) => a.seed_number - b.seed_number); const restingB = selected.rosters.filter((roster) => roster.competition_group_id === selectedSideB?.id && !playingIds.has(roster.player_id)).sort((a, b) => a.seed_number - b.seed_number); return <section key={round} className={`order-2 bg-white border rounded-2xl p-2.5 sm:p-4 ${extraRound ? 'border-violet-200' : 'border-gray-200'}`}><h3 className="font-semibold text-gray-900 mb-2 sm:mb-3">{extraRound ? 'Extra Match' : `Round ${round}`}</h3>{!extraRound && (restingA.length > 0 || restingB.length > 0) && <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900"><span className="font-semibold">Sitting out:</span> {restingA.length > 0 && <span>{sideName(selectedSideA, 'Team A')}: {restingA.map((player) => `#${player.seed_number} ${playerName(player.profile)}`).join(', ')}</span>}{restingA.length > 0 && restingB.length > 0 && <span className="mx-2">·</span>}{restingB.length > 0 && <span>{sideName(selectedSideB, 'Team B')}: {restingB.map((player) => `#${player.seed_number} ${playerName(player.profile)}`).join(', ')}</span>}</div>}<div className="grid xl:grid-cols-2 gap-2 sm:gap-3">{fixtures.map((fixture) => <FixtureCard key={fixture.id} fixture={fixture} groupA={sideName(selectedSideA, 'Team A')} groupB={sideName(selectedSideB, 'Team B')} canSubmit={isOrganiser || (isRosterPlayer && fixture.status === 'scheduled')} isOrganiser={isOrganiser} onResult={() => openResult(fixture)} onClear={() => clearResult(fixture)} onDelete={() => deleteFixture(fixture)} />)}</div></section>; })}
             </div>
           )}
         </main>
@@ -747,11 +761,32 @@ function TeamRosterEditor({ side, groups, players, roster, onToggle, otherRoster
 function FixtureCard({ fixture, groupA, groupB, canSubmit, isOrganiser, onResult, onClear, onDelete }: { fixture: CompetitionFixture; groupA: string; groupB: string; canSubmit: boolean; isOrganiser: boolean; onResult: () => void; onClear: () => void; onDelete: () => void }) {
   const playersA = (fixture.players || []).filter((player) => player.side === 'A').sort((a, b) => a.team_position - b.team_position);
   const playersB = (fixture.players || []).filter((player) => player.side === 'B').sort((a, b) => a.team_position - b.team_position);
-  return <article className={`border rounded-xl p-3 ${fixture.is_extra ? 'border-violet-200 bg-violet-50/30' : 'border-gray-200'}`}><div className="flex items-center justify-between gap-2 mb-3"><div className="text-xs text-gray-500"><span className={`font-semibold ${fixture.is_extra ? 'text-violet-700' : 'text-gray-700'}`}>{fixture.is_extra ? 'Extra match' : `Wave ${fixture.wave_number}`}</span> · Court {fixture.court_number} · {dateTimeLabel(fixture.scheduled_at)}</div>{fixture.status === 'completed' ? <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg text-xs"><Check className="w-3 h-3" />Done</span> : <span className="bg-amber-50 text-amber-700 px-2 py-1 rounded-lg text-xs">Upcoming</span>}</div><div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-stretch"><TeamBox name={groupA} side="A" players={playersA} winner={fixture.winner_side === 'A'} /><div className="flex items-center font-bold text-gray-300 text-xs">vs</div><TeamBox name={groupB} side="B" players={playersB} winner={fixture.winner_side === 'B'} /></div><div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100"><div>{fixture.status === 'completed' && <span className="font-bold text-gray-900 tabular-nums">{fixture.score_a} - {fixture.score_b}</span>}</div><div className="flex gap-2">{isOrganiser && fixture.status === 'completed' && <button onClick={onClear} title="Clear result and return match to upcoming" className="p-2 text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg"><RefreshCw className="w-4 h-4" /></button>}{isOrganiser && <button onClick={onDelete} title="Permanently delete match" className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg"><Trash2 className="w-4 h-4" /></button>}{canSubmit && <button onClick={onResult} className="px-3 py-2 bg-emerald-500 text-white rounded-lg text-xs font-semibold">{fixture.status === 'completed' ? 'Correct result' : 'Enter result'}</button>}</div></div></article>;
+  return (
+    <article className={`border rounded-xl p-2.5 sm:p-3 ${fixture.is_extra ? 'border-violet-200 bg-violet-50/30' : 'border-gray-200'}`}>
+      <div className="flex items-center justify-between gap-2 mb-2 text-[11px] sm:text-xs text-gray-500">
+        <span className="min-w-0 truncate"><b className={fixture.is_extra ? 'text-violet-700' : 'text-gray-700'}>{fixture.is_extra ? 'Extra' : `C${fixture.court_number}`}</b> · {dateTimeLabel(fixture.scheduled_at)} · Wave {fixture.wave_number}</span>
+        <span className={`shrink-0 inline-flex items-center gap-1 rounded-md px-1.5 py-1 ${fixture.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+          {fixture.status === 'completed' && <Check className="w-3 h-3" />}{fixture.status === 'completed' ? 'Done' : 'Upcoming'}
+        </span>
+      </div>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-1.5 sm:gap-2 items-stretch">
+        <TeamBox name={groupA} side="A" players={playersA} winner={fixture.winner_side === 'A'} />
+        <div className="flex flex-col items-center justify-center text-center min-w-[38px] sm:min-w-[52px]">
+          {fixture.status === 'completed' ? <strong className="text-xs sm:text-base text-gray-900 tabular-nums whitespace-nowrap">{fixture.score_a}–{fixture.score_b}</strong> : <span className="text-xs font-bold text-gray-400">vs</span>}
+        </div>
+        <TeamBox name={groupB} side="B" players={playersB} winner={fixture.winner_side === 'B'} />
+      </div>
+      {(canSubmit || isOrganiser) && <div className="flex justify-end gap-1.5 mt-2">
+        {isOrganiser && fixture.status === 'completed' && <button onClick={onClear} aria-label="Clear result and return match to upcoming" title="Clear result and return match to upcoming" className="p-2 text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg"><RefreshCw className="w-4 h-4" /></button>}
+        {isOrganiser && <button onClick={onDelete} aria-label="Permanently delete match" title="Permanently delete match" className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg"><Trash2 className="w-4 h-4" /></button>}
+        {canSubmit && <button onClick={onResult} className="px-3 py-2 bg-emerald-500 text-white rounded-lg text-xs font-semibold">{fixture.status === 'completed' ? 'Correct result' : 'Enter result'}</button>}
+      </div>}
+    </article>
+  );
 }
 
 function TeamBox({ name, side, players, winner }: { name: string; side: TeamLabel; players: any[]; winner: boolean }) {
-  return <div className={`rounded-lg p-2 border min-w-0 ${side === 'A' ? 'bg-sky-50 border-sky-100' : 'bg-rose-50 border-rose-100'}`}><p className="text-[11px] font-semibold text-gray-500 break-words">{name}{winner && <Trophy className="inline w-3 h-3 ml-1 text-amber-500" />}</p>{players.map((player) => <p key={player.id} className="text-xs text-gray-900 font-medium mt-1 break-words"><span className="text-gray-400">#{player.seed_number}</span> {playerName(player.profile)}</p>)}</div>;
+  return <div className={`rounded-lg px-2 py-1.5 border min-w-0 ${side === 'A' ? 'bg-sky-50 border-sky-100' : 'bg-rose-50 border-rose-100'}`}><p className="text-[11px] font-semibold text-gray-700 truncate" title={name}>{name}{winner && <Trophy className="inline w-3 h-3 ml-1 text-amber-500" />}</p>{players.map((player) => <p key={player.id} className="text-[11px] sm:text-xs text-gray-900 font-medium mt-0.5 truncate" title={playerName(player.profile)}><span className="text-gray-400">#{player.seed_number}</span> {playerName(player.profile)}</p>)}</div>;
 }
 
 function ExtraMatchModal({ challenge, sideA, sideB, form, onToggle, onCourt, onTime, onRematch, onSave, onClose, saving }: {

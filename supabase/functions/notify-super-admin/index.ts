@@ -75,14 +75,21 @@ Deno.serve(async (req: Request) => {
 
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
     const fromEmail = Deno.env.get("NOTIFICATION_FROM_EMAIL");
+    const testEmail = Deno.env.get("NOTIFICATION_TEST_EMAIL")?.trim();
     let emailStatus: "sent" | "failed" = "failed";
     try {
     if (resendApiKey && fromEmail) {
-      const { data: superAdmins } = await adminClient.from("profiles").select("id").eq("role", "super_admin");
       const recipients: string[] = [];
-      for (const profile of superAdmins || []) {
-        const { data } = await adminClient.auth.admin.getUserById(profile.id);
-        if (data.user?.email) recipients.push(data.user.email);
+      if (testEmail) {
+        // Resend's test sender can deliver only to the account's verified address.
+        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail)) recipients.push(testEmail);
+        else console.error("Notification test email is invalid");
+      } else {
+        const { data: superAdmins } = await adminClient.from("profiles").select("id").eq("role", "super_admin");
+        for (const profile of superAdmins || []) {
+          const { data } = await adminClient.auth.admin.getUserById(profile.id);
+          if (data.user?.email) recipients.push(data.user.email);
+        }
       }
       if (recipients.length) {
         const html = body.action === "contact_us"
@@ -99,7 +106,7 @@ Deno.serve(async (req: Request) => {
         });
         emailStatus = response.ok ? "sent" : "failed";
         if (!response.ok) console.error("Notification email failed", response.status, await response.text());
-      } else console.error("Notification email failed: no Super Admin recipient");
+      } else console.error("Notification email failed: no recipient");
     } else console.error("Notification email failed: Resend configuration is missing");
     } catch (error) {
       console.error("Notification email failed unexpectedly", error);

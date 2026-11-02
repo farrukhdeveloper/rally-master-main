@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowDown, ArrowUp, CalendarDays, Check, Clock, MapPin,
+  ArrowDown, ArrowUp, CalendarDays, Check, ChevronRight, Clock, MapPin, MoreHorizontal,
   Plus, RefreshCw, Search, ShieldCheck, Swords, Trash2, Trophy, X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -761,28 +761,34 @@ function TeamRosterEditor({ side, groups, players, roster, onToggle, otherRoster
 function FixtureCard({ fixture, groupA, groupB, canSubmit, isOrganiser, onResult, onClear, onDelete }: { fixture: CompetitionFixture; groupA: string; groupB: string; canSubmit: boolean; isOrganiser: boolean; onResult: () => void; onClear: () => void; onDelete: () => void }) {
   const playersA = (fixture.players || []).filter((player) => player.side === 'A').sort((a, b) => a.team_position - b.team_position);
   const playersB = (fixture.players || []).filter((player) => player.side === 'B').sort((a, b) => a.team_position - b.team_position);
+  const time = new Date(fixture.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const resultLabel = fixture.status === 'completed' ? 'Correct result' : 'Enter result';
   return (
-    <article className={`border rounded-xl p-2.5 sm:p-3 ${fixture.is_extra ? 'border-violet-200 bg-violet-50/30' : 'border-gray-200'}`}>
-      <div className="flex items-center justify-between gap-2 mb-2 text-[11px] sm:text-xs text-gray-500">
-        <span className="min-w-0 truncate"><b className={fixture.is_extra ? 'text-violet-700' : 'text-gray-700'}>{fixture.is_extra ? 'Extra' : `C${fixture.court_number}`}</b> · {dateTimeLabel(fixture.scheduled_at)} · Wave {fixture.wave_number}</span>
-        <span className={`shrink-0 inline-flex items-center gap-1 rounded-md px-1.5 py-1 ${fixture.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-          {fixture.status === 'completed' && <Check className="w-3 h-3" />}{fixture.status === 'completed' ? 'Done' : 'Upcoming'}
-        </span>
+    <article className={`relative border rounded-xl p-1.5 sm:p-2.5 ${fixture.is_extra ? 'border-violet-200 bg-violet-50/30' : 'border-gray-200'}`}>
+      <div className="flex min-[400px]:hidden items-center justify-between gap-2 px-1 pb-1 text-[10px] text-gray-500">
+        <span title={dateTimeLabel(fixture.scheduled_at)}>Court {fixture.court_number} · {time} · Wave {fixture.wave_number}{fixture.is_extra ? ' · Extra' : ''}</span>
+        <span>{fixture.status === 'completed' ? 'Done' : 'Upcoming'}</span>
       </div>
-      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-1.5 sm:gap-2 items-stretch">
-        <TeamBox name={groupA} side="A" players={playersA} winner={fixture.winner_side === 'A'} />
-        <div className="flex flex-col items-center justify-center text-center min-w-[38px] sm:min-w-[52px]">
-          {fixture.status === 'completed' ? <strong className="text-xs sm:text-base text-gray-900 tabular-nums whitespace-nowrap">{fixture.score_a}–{fixture.score_b}</strong> : <span className="text-xs font-bold text-gray-400">vs</span>}
+      <div className="grid grid-cols-[minmax(0,1fr)_40px_minmax(0,1fr)_32px] min-[400px]:grid-cols-[40px_minmax(0,1fr)_52px_minmax(0,1fr)_36px] gap-1 items-stretch">
+        <div className="hidden min-[400px]:flex flex-col items-center justify-center border-r border-gray-100 text-gray-500" title={dateTimeLabel(fixture.scheduled_at)}>
+          <strong className="text-xs text-gray-900">C{fixture.court_number}</strong><span className="text-[10px]">{time}</span><span className="text-[10px]">W{fixture.wave_number}</span>
         </div>
-        <TeamBox name={groupB} side="B" players={playersB} winner={fixture.winner_side === 'B'} />
+        <CompactTeamBox name={groupA} side="A" players={playersA} winner={fixture.winner_side === 'A'} />
+        <div className="flex flex-col items-center justify-center text-center min-w-0">
+          {fixture.status === 'completed' ? <strong className="text-[11px] sm:text-sm text-gray-900 tabular-nums whitespace-nowrap">{fixture.score_a}–{fixture.score_b}</strong> : <span className="text-[11px] font-bold text-gray-400">vs</span>}
+        </div>
+        <CompactTeamBox name={groupB} side="B" players={playersB} winner={fixture.winner_side === 'B'} />
+        <div className="flex flex-col items-center justify-center gap-1">
+          {canSubmit ? <button onClick={onResult} aria-label={resultLabel} title={resultLabel} className="flex items-center justify-center w-8 h-9 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100"><ChevronRight className="w-5 h-5" /></button> : fixture.status === 'completed' ? <Check aria-label="Completed" className="w-5 h-5 text-emerald-600" /> : <Clock aria-label="Upcoming" className="w-4 h-4 text-gray-300" />}
+          {isOrganiser && <details className="group"><summary aria-label="Match actions" title="Match actions" className="list-none cursor-pointer flex items-center justify-center w-8 h-7 rounded-lg text-gray-500 hover:bg-gray-100"><MoreHorizontal className="w-4 h-4" /></summary><div className="absolute right-1 top-full z-10 mt-1 min-w-40 rounded-lg border border-gray-200 bg-white p-1 shadow-lg text-xs">{fixture.status === 'completed' && <button onClick={onClear} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-amber-700 hover:bg-amber-50"><RefreshCw className="w-3.5 h-3.5" />Clear result</button>}<button onClick={onDelete} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-red-600 hover:bg-red-50"><Trash2 className="w-3.5 h-3.5" />Delete match</button></div></details>}
+        </div>
       </div>
-      {(canSubmit || isOrganiser) && <div className="flex justify-end gap-1.5 mt-2">
-        {isOrganiser && fixture.status === 'completed' && <button onClick={onClear} aria-label="Clear result and return match to upcoming" title="Clear result and return match to upcoming" className="p-2 text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-lg"><RefreshCw className="w-4 h-4" /></button>}
-        {isOrganiser && <button onClick={onDelete} aria-label="Permanently delete match" title="Permanently delete match" className="p-2 text-red-500 bg-red-50 hover:bg-red-100 rounded-lg"><Trash2 className="w-4 h-4" /></button>}
-        {canSubmit && <button onClick={onResult} className="px-3 py-2 bg-emerald-500 text-white rounded-lg text-xs font-semibold">{fixture.status === 'completed' ? 'Correct result' : 'Enter result'}</button>}
-      </div>}
     </article>
   );
+}
+
+function CompactTeamBox({ name, side, players, winner }: { name: string; side: TeamLabel; players: any[]; winner: boolean }) {
+  return <div className={`rounded-lg px-1.5 py-1 border min-w-0 ${side === 'A' ? 'bg-sky-50 border-sky-100' : 'bg-rose-50 border-rose-100'}`}><p className={`text-[10px] sm:text-xs font-semibold truncate ${side === 'A' ? 'text-sky-700' : 'text-rose-700'}`} title={name}>{name}{winner && <Trophy className="inline w-3 h-3 ml-1 text-amber-500" />}</p>{players.map((player) => <p key={player.id} className="text-[11px] sm:text-xs leading-tight text-gray-900 font-medium mt-0.5 truncate" title={playerName(player.profile)}><span className="text-gray-400">#{player.seed_number}</span> {playerName(player.profile)}</p>)}</div>;
 }
 
 function TeamBox({ name, side, players, winner }: { name: string; side: TeamLabel; players: any[]; winner: boolean }) {

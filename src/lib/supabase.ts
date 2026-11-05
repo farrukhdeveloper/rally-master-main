@@ -5,12 +5,6 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Isolated client for admin-side user creation - has its own auth storage
-// so signUp() here does NOT affect the main session.
-export const supabaseAdmin = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: { storageKey: 'sb-admin-create-user', persistSession: false },
-});
-
 export type SkillLevel =
   | 'level_1'
   | 'level_2'

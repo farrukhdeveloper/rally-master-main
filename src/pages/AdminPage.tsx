@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase, supabaseAdmin, Session, Court, Profile, SkillLevel, Environment, Group, PlayerGroup } from '../lib/supabase';
+import { supabase, Session, Court, Profile, SkillLevel, Environment, Group, PlayerGroup } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { AdminSubPage } from '../components/Layout';
 import { SKILL_LEVELS, normalizeSkillLevel, skillLevelColor, skillLevelLabel, skillLevelTextColor } from '../lib/skillLevels';
@@ -1488,41 +1488,7 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
     setAddError('');
     setAddLoading(true);
     try {
-      const { data, error } = await supabaseAdmin.auth.signUp({ email: addForm.email, password: addForm.password });
-      if (error) throw error;
-      if (data.user) {
-        const { error: profileError } = await supabase.from('profiles').insert({
-          id: data.user.id,
-          full_name: addForm.full_name,
-          skill_level: addForm.skill_level,
-          phone: addForm.phone,
-          role: addForm.role,
-          environment: addForm.environment,
-        });
-        if (profileError) throw profileError;
-
-        if (addForm.group_ids.length > 0) {
-          const { error: groupsError } = await supabase.from('player_groups').insert(
-            addForm.group_ids.map((groupId) => ({
-              group_id: groupId,
-              player_id: data.user!.id,
-              role: 'member',
-            }))
-          );
-          if (groupsError) throw groupsError;
-        }
-        supabase.functions.invoke('notify-super-admin', {
-          body: {
-            action: 'account_created',
-            full_name: addForm.full_name,
-            email: addForm.email,
-            phone: addForm.phone,
-          },
-        }).catch((notifyError) => {
-          console.warn('Account notification failed', notifyError);
-        });
-      }
-      await supabaseAdmin.auth.signOut();
+      await callManagePlayer({ action: 'create_player', ...addForm });
       setShowAdd(false);
       setAddForm({
         full_name: '',
@@ -1714,10 +1680,10 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
           )}
           <form onSubmit={addPlayer} className="space-y-4">
             <div className="grid md:grid-cols-2 gap-3">
-              <input placeholder="Full Name *" value={addForm.full_name} onChange={(e) => setAddForm((f) => ({ ...f, full_name: e.target.value }))} required className="bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
-              <input placeholder="Phone" value={addForm.phone} onChange={(e) => setAddForm((f) => ({ ...f, phone: e.target.value }))} className="bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
+              <input placeholder="Full Name *" value={addForm.full_name} onChange={(e) => setAddForm((f) => ({ ...f, full_name: e.target.value }))} required maxLength={150} className="bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
+              <input placeholder="Phone" value={addForm.phone} onChange={(e) => setAddForm((f) => ({ ...f, phone: e.target.value }))} maxLength={30} className="bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
               <input type="email" placeholder="Email *" value={addForm.email} onChange={(e) => setAddForm((f) => ({ ...f, email: e.target.value }))} required className="bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
-              <input type="password" placeholder="Password *" value={addForm.password} onChange={(e) => setAddForm((f) => ({ ...f, password: e.target.value }))} required className="bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
+              <input type="password" placeholder="Password * (8+ characters)" value={addForm.password} onChange={(e) => setAddForm((f) => ({ ...f, password: e.target.value }))} required minLength={8} className="bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
             </div>
 
             <div className="grid md:grid-cols-3 gap-3 items-end">
@@ -1737,7 +1703,7 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
                   <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
                   <select value={addForm.role} onChange={(e) => setAddForm((f) => ({ ...f, role: e.target.value as 'player' | 'admin' }))} className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 appearance-none">
                     <option value="player">Player</option>
-                    <option value="admin">Admin</option>
+                    {isSuperAdmin && <option value="admin">Admin</option>}
                   </select>
                 </div>
               </div>

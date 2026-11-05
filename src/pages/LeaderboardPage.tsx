@@ -3,6 +3,7 @@ import { supabase, Profile, Environment, SkillLevel, Group } from '../lib/supaba
 import { SKILL_LEVELS, normalizeSkillLevel, skillLevelColor, skillLevelLabel } from '../lib/skillLevels';
 import { calculatePlayerRatingsFromMatches } from '../lib/rating';
 import RatingProgress from '../components/RatingProgress';
+import PlayerAvatar from '../components/PlayerAvatar';
 import { BarChart2, Trophy, Medal } from 'lucide-react';
 
 interface LeaderboardEntry {
@@ -218,9 +219,7 @@ export default function LeaderboardPage({ envFilter = 'prod' }: { envFilter?: En
                 </div>
 
                 {/* Avatar */}
-                <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 font-semibold flex-shrink-0">
-                  {entry.profile?.full_name?.charAt(0)?.toUpperCase() || '?'}
-                </div>
+                <PlayerAvatar name={entry.profile?.full_name} photoPath={entry.profile?.avatar_url} />
 
                 {/* Name & skill */}
                 <div className="flex-1 min-w-0">

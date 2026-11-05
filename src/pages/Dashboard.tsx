@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase, Session, PlayerMatchHistory, Environment, SessionInvite, InviteStatus, Profile } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { skillLevelColor, skillLevelLabel } from '../lib/skillLevels';
+import PlayerAvatar from '../components/PlayerAvatar';
 import { Calendar, CheckCircle, XCircle, Trophy, Target, Flame, Users, Send, Inbox, Crown, Medal, Sparkles } from 'lucide-react';
 
 type SessionInviteWithDetails = SessionInvite & { session?: Session; profile?: Profile };
@@ -485,9 +486,7 @@ export default function Dashboard({ envFilter = 'prod' }: { envFilter?: Environm
 
       <div className="mt-8 bg-white border border-gray-200 rounded-2xl p-5">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 font-bold text-lg">
-            {profile?.full_name?.charAt(0)?.toUpperCase() || '?'}
-          </div>
+          <PlayerAvatar name={profile?.full_name} photoPath={profile?.avatar_url} className="w-10 h-10 text-lg" />
           <div>
             <p className="text-gray-900 font-semibold">{profile?.full_name}</p>
             <div className="flex items-center gap-2 mt-0.5">
@@ -850,9 +849,7 @@ function AdminInvitePanel({
                 const isPendingRequest = isPendingPlayerRequest(invite);
                 return (
                   <div key={player.id} className="flex items-center gap-3 p-3 rounded-2xl bg-gray-50">
-                    <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 text-sm font-bold flex-shrink-0">
-                      {player.full_name.charAt(0).toUpperCase()}
-                    </div>
+                    <PlayerAvatar name={player.full_name} photoPath={player.avatar_url} className="w-9 h-9 text-sm" />
                     <div className="flex-1 min-w-0">
                       <p className="text-gray-900 text-sm font-semibold truncate">{player.full_name}</p>
                       <span className={`inline-flex text-xs px-2 py-0.5 rounded-lg border font-semibold ${skillLevelColor(player.skill_level)}`}>

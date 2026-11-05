@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { LockKeyhole, Save, UserRound } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import PlayerPhotoEditor from '../components/PlayerPhotoEditor';
 
 export default function ProfilePage() {
   const { user, profile, refreshProfile } = useAuth();
@@ -68,7 +69,12 @@ export default function ProfilePage() {
   }
 
   return <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
-    <div><h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><UserRound className="w-6 h-6 text-emerald-600" /> My Profile</h1><p className="text-sm text-gray-500 mt-1">Update your phone number and password.</p></div>
+    <div><h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><UserRound className="w-6 h-6 text-emerald-600" /> My Profile</h1><p className="text-sm text-gray-500 mt-1">Update your photo, phone number and password.</p></div>
+
+    {user && profile && <section className="bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 space-y-4">
+      <div><h2 className="font-semibold text-gray-900">Profile photo</h2><p className="text-sm text-gray-500 mt-1">Choose a photo to appear beside your name.</p></div>
+      <PlayerPhotoEditor playerId={user.id} name={profile.full_name} photoPath={profile.avatar_url} onSaved={refreshProfile} />
+    </section>}
 
     <form onSubmit={saveDetails} className="bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 space-y-4">
       <div><h2 className="font-semibold text-gray-900">Contact details</h2><p className="text-sm text-gray-500 mt-1">Your name is managed by an administrator.</p></div>

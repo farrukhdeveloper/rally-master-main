@@ -5,6 +5,8 @@ import { AdminSubPage } from '../components/Layout';
 import { SKILL_LEVELS, normalizeSkillLevel, skillLevelColor, skillLevelLabel, skillLevelTextColor } from '../lib/skillLevels';
 import { calculatePlayerRatingsFromMatches } from '../lib/rating';
 import RatingProgress from '../components/RatingProgress';
+import PlayerAvatar from '../components/PlayerAvatar';
+import PlayerPhotoEditor from '../components/PlayerPhotoEditor';
 import { Plus, Calendar, Trash2, Users, Monitor, X, RefreshCw, Search, CreditCard as Edit2, Check, ShieldCheck, ShieldOff, UserPlus, ChevronDown, Settings, MessageCircle, Send, Copy, CheckCheck, ExternalLink, AlertCircle, Mail, AlertTriangle, Crown, BarChart2, KeyRound } from 'lucide-react';
 
 type EnvFilter = 'all' | Environment;
@@ -1788,6 +1790,7 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
               <div key={player.id} className={`bg-white border rounded-2xl px-5 py-4 transition-all ${isEditing ? 'border-emerald-400' : 'border-gray-200'}`}>
                 {isEditing ? (
                   <div className="space-y-3">
+                    <PlayerPhotoEditor playerId={player.id} name={player.full_name} photoPath={player.avatar_url} onSaved={loadPlayers} />
                     <div className="grid sm:grid-cols-4 gap-3 items-center">
                       <input value={editForm.full_name || ''} onChange={(e) => setEditForm((f) => ({ ...f, full_name: e.target.value }))} placeholder="Full name" className="bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
                       <input value={editForm.phone || ''} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Phone" className="bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
@@ -1808,9 +1811,7 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
                   </div>
                 ) : (
                   <div className="flex items-center gap-4">
-                    <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 font-semibold text-sm flex-shrink-0">
-                      {player.full_name?.charAt(0)?.toUpperCase() || '?'}
-                    </div>
+                    <PlayerAvatar name={player.full_name} photoPath={player.avatar_url} className="w-9 h-9 text-sm" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-gray-900 font-medium">{player.full_name}</p>

@@ -2,6 +2,7 @@ import { ReactNode, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Environment } from '../lib/supabase';
 import { skillLevelColor, skillLevelLabel } from '../lib/skillLevels';
+import PlayerAvatar from './PlayerAvatar';
 import {
   Feather, LayoutDashboard, Calendar, Monitor, BarChart2, PlayCircle,
   LogOut, Menu, X, Shield, ChevronRight, History, HelpCircle, Shuffle, Swords, UserRound
@@ -141,9 +142,7 @@ export default function Layout({ children, currentPage, onNavigate, adminSubPage
         {/* Profile */}
         <div className="p-4 border-t border-gray-200">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-9 h-9 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600 font-semibold text-sm">
-              {profile?.full_name?.charAt(0)?.toUpperCase() || '?'}
-            </div>
+            <PlayerAvatar name={profile?.full_name} photoPath={profile?.avatar_url} className="w-9 h-9 text-sm" />
             <div className="flex-1 min-w-0">
               <p className="text-gray-900 text-sm font-medium truncate">{profile?.full_name || 'Player'}</p>
               <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">

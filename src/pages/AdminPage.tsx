@@ -1401,6 +1401,8 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Profile>>({});
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
   const [addForm, setAddForm] = useState<NewPlayerForm>({
     full_name: '', email: '', password: '', phone: '',
     skill_level: 'level_5', role: 'player', environment: 'prod', group_ids: [],
@@ -1411,6 +1413,8 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
   const [modalLoading, setModalLoading] = useState(false);
   const [modalError, setModalError] = useState('');
   const [newEmail, setNewEmail] = useState('');
+  const [currentEmail, setCurrentEmail] = useState('');
+  const [emailLoading, setEmailLoading] = useState(false);
 
   useEffect(() => {
     loadPlayers();
@@ -1447,15 +1451,29 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
     }));
   }
 
+  function openEdit(player: Profile) {
+    setEditForm({ full_name: player.full_name, skill_level: player.skill_level, phone: player.phone });
+    setEditError('');
+    setEditId(player.id);
+  }
+
   async function saveEdit(id: string) {
-    await supabase.from('profiles').update({
-      full_name: editForm.full_name,
-      skill_level: editForm.skill_level,
-      phone: editForm.phone,
-      role: editForm.role,
-    }).eq('id', id);
-    setPlayers((prev) => prev.map((p) => (p.id === id ? { ...p, ...editForm } as Profile : p)));
-    setEditId(null);
+    setEditSaving(true);
+    setEditError('');
+    try {
+      const { error } = await supabase.from('profiles').update({
+        full_name: editForm.full_name?.trim(),
+        skill_level: editForm.skill_level,
+        phone: editForm.phone?.trim() || '',
+      }).eq('id', id);
+      if (error) throw error;
+      await loadPlayers();
+      setEditId(null);
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : 'Could not save the player.');
+    } finally {
+      setEditSaving(false);
+    }
   }
 
   async function toggleRole(player: Profile) {
@@ -1571,11 +1589,21 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
     }
   }
 
-  function openEmailModal(player: Profile) {
+  async function openEmailModal(player: Profile) {
     if (!isSuperAdmin) return;
     setNewEmail('');
+    setCurrentEmail('');
     setModalError('');
     setModal({ type: 'email', player });
+    setEmailLoading(true);
+    try {
+      const result = await callManagePlayer({ action: 'get_email', player_id: player.id });
+      setCurrentEmail(result.email || 'No email address found');
+    } catch (error) {
+      setModalError(error instanceof Error ? error.message : 'Could not load the current email.');
+    } finally {
+      setEmailLoading(false);
+    }
   }
 
   function openResetModal(player: Profile) {
@@ -1610,6 +1638,7 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
 
   const adminCount = players.filter((p) => p.role === 'admin' || p.role === 'super_admin').length;
   const availableGroupsForAdd = groups.filter((group) => group.environment === addForm.environment);
+  const editingPlayer = players.find((player) => player.id === editId);
 
   return (
     <div className="space-y-5">
@@ -1784,37 +1813,16 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
       ) : (
         <div className="space-y-2">
           {filtered.map((player) => {
-            const isEditing = editId === player.id;
             const isSelf = player.id === user?.id;
             return (
-              <div key={player.id} className={`bg-white border rounded-2xl px-5 py-4 transition-all ${isEditing ? 'border-emerald-400' : 'border-gray-200'}`}>
-                {isEditing ? (
-                  <div className="space-y-3">
-                    <PlayerPhotoEditor playerId={player.id} name={player.full_name} photoPath={player.avatar_url} onSaved={loadPlayers} />
-                    <div className="grid sm:grid-cols-4 gap-3 items-center">
-                      <input value={editForm.full_name || ''} onChange={(e) => setEditForm((f) => ({ ...f, full_name: e.target.value }))} placeholder="Full name" className="bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
-                      <input value={editForm.phone || ''} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Phone" className="bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
-                      <div className="relative">
-                        <select value={normalizeSkillLevel(editForm.skill_level)} onChange={(e) => setEditForm((f) => ({ ...f, skill_level: e.target.value as SkillLevel }))} className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 appearance-none">
-                          {SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLevelLabel(level)}</option>)}
-                        </select>
-                      </div>
-                      <div className="flex gap-2">
-                        <button onClick={() => saveEdit(player.id)} className="flex-1 flex items-center justify-center gap-1 bg-emerald-500 hover:bg-emerald-400 text-white text-sm py-2 rounded-xl transition-all">
-                          <Check className="w-3.5 h-3.5" /> Save
-                        </button>
-                        <button onClick={() => setEditId(null)} className="px-3 py-2 bg-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-300">
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
+              <div key={player.id} className="bg-white border border-gray-200 rounded-2xl px-5 py-4 transition-all">
                   <div className="flex items-center gap-4">
                     <PlayerAvatar name={player.full_name} photoPath={player.avatar_url} className="w-9 h-9 text-sm" />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-gray-900 font-medium">{player.full_name}</p>
+                        <button type="button" onClick={() => openEdit(player)} className="text-left text-gray-900 font-medium hover:text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 rounded" aria-label={`Edit ${player.full_name}`}>
+                          {player.full_name}
+                        </button>
                         {isSelf && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-md font-medium">You</span>}
                         {player.role === 'super_admin' && <span className="text-xs bg-rose-50 text-rose-600 border border-rose-200 px-1.5 py-0.5 rounded-md font-medium flex items-center gap-1"><Crown className="w-3 h-3" />Super Admin</span>}
                         {player.role === 'admin' && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded-md font-medium">Admin</span>}
@@ -1828,9 +1836,6 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
                       {skillLevelLabel(player.skill_level)}
                     </span>
                     <div className="flex items-center gap-1 flex-shrink-0">
-                      <button onClick={() => { setEditId(player.id); setEditForm({ full_name: player.full_name, skill_level: player.skill_level, phone: player.phone, role: player.role }); }} className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all" title="Edit name / phone / skill">
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
                       {isSuperAdmin && <button onClick={() => openEmailModal(player)} className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all" title="Change email address">
                         <Mail className="w-3.5 h-3.5" />
                       </button>}
@@ -1852,10 +1857,31 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
                       </button>
                     </div>
                   </div>
-                )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {editingPlayer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditId(null); }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="edit-player-title" className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 sm:p-6 space-y-5">
+            <div className="flex items-center justify-between gap-3">
+              <div><h3 id="edit-player-title" className="text-lg text-gray-900 font-semibold">Edit {editingPlayer.full_name}</h3><p className="text-sm text-gray-500">Update player details and photo.</p></div>
+              <button type="button" onClick={() => setEditId(null)} className="p-2 text-gray-400 hover:text-gray-900 rounded-lg" aria-label="Close player editor"><X className="w-5 h-5" /></button>
+            </div>
+            <PlayerPhotoEditor playerId={editingPlayer.id} name={editingPlayer.full_name} photoPath={editingPlayer.avatar_url} onSaved={loadPlayers} />
+            <div className="space-y-3">
+              <label className="block text-sm font-medium text-gray-700">Full name<input value={editForm.full_name || ''} onChange={(event) => setEditForm((form) => ({ ...form, full_name: event.target.value }))} className="mt-1 block w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500" /></label>
+              <label className="block text-sm font-medium text-gray-700">Phone<input type="tel" value={editForm.phone || ''} onChange={(event) => setEditForm((form) => ({ ...form, phone: event.target.value }))} className="mt-1 block w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500" /></label>
+              <label className="block text-sm font-medium text-gray-700">Level<select value={normalizeSkillLevel(editForm.skill_level)} onChange={(event) => setEditForm((form) => ({ ...form, skill_level: event.target.value as SkillLevel }))} className="mt-1 block w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500">{SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLevelLabel(level)}</option>)}</select></label>
+            </div>
+            {editError && <p role="alert" className="text-sm text-red-600">{editError}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setEditId(null)} className="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm">Cancel</button>
+              <button type="button" onClick={() => saveEdit(editingPlayer.id)} disabled={editSaving || !editForm.full_name?.trim()} className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-emerald-500 text-white rounded-xl text-sm font-semibold disabled:opacity-50"><Check className="w-4 h-4" />{editSaving ? 'Saving...' : 'Save player'}</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1872,6 +1898,10 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
             <p className="text-gray-500 text-sm mb-4">
               Changing the email for <span className="font-medium text-gray-900">{modal.player.full_name}</span>. They will use this new address to log in.
             </p>
+            <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm">
+              <span className="block text-xs font-medium text-gray-500 mb-1">Current email</span>
+              <span className="text-gray-900 break-all">{emailLoading ? 'Loading...' : currentEmail || 'Unavailable'}</span>
+            </div>
             {modalError && <div className="bg-red-50 border border-red-200 text-red-500 text-sm rounded-lg px-4 py-2 mb-3">{modalError}</div>}
             <input
               type="email"
@@ -1881,7 +1911,7 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
               className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500 mb-4"
             />
             <div className="flex gap-2">
-              <button onClick={handleUpdateEmail} disabled={modalLoading || !newEmail.includes('@')} className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-semibold transition-all">
+              <button onClick={handleUpdateEmail} disabled={modalLoading || emailLoading || !currentEmail || !newEmail.includes('@')} className="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-semibold transition-all">
                 {modalLoading ? 'Saving...' : 'Update Email'}
               </button>
               <button onClick={() => setModal({ type: 'none' })} className="px-4 bg-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-300">Cancel</button>

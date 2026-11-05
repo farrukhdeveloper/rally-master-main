@@ -96,6 +96,19 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    if (action === "get_email") {
+      if (callerProfile?.role !== "super_admin") {
+        return new Response(JSON.stringify({ error: "Forbidden: SuperAdmin only" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data, error } = await adminClient.auth.admin.getUserById(player_id);
+      if (error) throw error;
+      return new Response(JSON.stringify({ email: data.user?.email || "" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (action === "send_password_reset") {
       const { data, error: userError } = await adminClient.auth.admin.getUserById(player_id);
       if (userError) throw userError;

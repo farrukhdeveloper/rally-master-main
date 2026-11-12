@@ -24,6 +24,18 @@ export const SKILL_LEVEL_LABELS: Record<SkillLevel, string> = {
   level_9: 'Level 9',
 };
 
+export const SKILL_LEVEL_DESCRIPTIONS: Record<SkillLevel, string> = {
+  level_1: 'New to badminton; learning rules, grip, and basic contact.',
+  level_2: 'Can serve and rally briefly with guidance.',
+  level_3: 'Developing basic strokes and court movement.',
+  level_4: 'Plays recreational games with improving placement and consistency.',
+  level_5: 'Consistent intermediate play; uses basic positioning and tactics.',
+  level_6: 'Strong intermediate play; controls pace and recovers reliably.',
+  level_7: 'Advanced play; varies shots and reads opponents well.',
+  level_8: 'Highly competitive play; strong technique and tactical execution.',
+  level_9: 'Expert play; sustained control and decision making under pressure.',
+};
+
 export const SKILL_LEVEL_COLORS: Record<SkillLevel, string> = {
   level_1: 'bg-slate-50 text-slate-600 border-slate-200',
   level_2: 'bg-sky-50 text-sky-600 border-sky-200',

@@ -7,6 +7,7 @@ import { calculatePlayerRatingsFromMatches } from '../lib/rating';
 import RatingProgress from '../components/RatingProgress';
 import PlayerAvatar from '../components/PlayerAvatar';
 import PlayerPhotoEditor from '../components/PlayerPhotoEditor';
+import PlayerGradingEditor from '../components/PlayerGradingEditor';
 import { Plus, Calendar, Trash2, Users, Monitor, X, RefreshCw, Search, CreditCard as Edit2, Check, ShieldCheck, ShieldOff, UserPlus, ChevronDown, Settings, MessageCircle, Send, Copy, CheckCheck, ExternalLink, AlertCircle, Mail, AlertTriangle, Crown, BarChart2, KeyRound } from 'lucide-react';
 
 type EnvFilter = 'all' | Environment;
@@ -1452,7 +1453,7 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
   }
 
   function openEdit(player: Profile) {
-    setEditForm({ full_name: player.full_name, skill_level: player.skill_level, phone: player.phone });
+    setEditForm({ full_name: player.full_name, phone: player.phone });
     setEditError('');
     setEditId(player.id);
   }
@@ -1463,7 +1464,6 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
     try {
       const { error } = await supabase.from('profiles').update({
         full_name: editForm.full_name?.trim(),
-        skill_level: editForm.skill_level,
         phone: editForm.phone?.trim() || '',
       }).eq('id', id);
       if (error) throw error;
@@ -1833,15 +1833,15 @@ function PlayersAdmin({ envFilter }: { envFilter: EnvFilter }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditId(null); }}>
           <div role="dialog" aria-modal="true" aria-labelledby="edit-player-title" className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 sm:p-6 space-y-5">
             <div className="flex items-center justify-between gap-3">
-              <div><h3 id="edit-player-title" className="text-lg text-gray-900 font-semibold">Edit {editingPlayer.full_name}</h3><p className="text-sm text-gray-500">Update player details and photo.</p></div>
+              <div><h3 id="edit-player-title" className="text-lg text-gray-900 font-semibold">Edit {editingPlayer.full_name}</h3><p className="text-sm text-gray-500">Update details, photo, and grading.</p></div>
               <button type="button" onClick={() => setEditId(null)} className="p-2 text-gray-400 hover:text-gray-900 rounded-lg" aria-label="Close player editor"><X className="w-5 h-5" /></button>
             </div>
             <PlayerPhotoEditor playerId={editingPlayer.id} name={editingPlayer.full_name} photoPath={editingPlayer.avatar_url} onSaved={loadPlayers} />
             <div className="space-y-3">
               <label className="block text-sm font-medium text-gray-700">Full name<input value={editForm.full_name || ''} onChange={(event) => setEditForm((form) => ({ ...form, full_name: event.target.value }))} className="mt-1 block w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500" /></label>
               <label className="block text-sm font-medium text-gray-700">Phone<input type="tel" value={editForm.phone || ''} onChange={(event) => setEditForm((form) => ({ ...form, phone: event.target.value }))} className="mt-1 block w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500" /></label>
-              <label className="block text-sm font-medium text-gray-700">Level<select value={normalizeSkillLevel(editForm.skill_level)} onChange={(event) => setEditForm((form) => ({ ...form, skill_level: event.target.value as SkillLevel }))} className="mt-1 block w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-emerald-500">{SKILL_LEVELS.map((level) => <option key={level} value={level}>{skillLevelLabel(level)}</option>)}</select></label>
             </div>
+            <PlayerGradingEditor key={editingPlayer.id} player={editingPlayer} onSaved={loadPlayers} />
             {editError && <p role="alert" className="text-sm text-red-600">{editError}</p>}
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setEditId(null)} className="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm">Cancel</button>

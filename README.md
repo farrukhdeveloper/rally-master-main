@@ -18,6 +18,10 @@ Import this GitHub repository from the Bolt homepage. Configure `VITE_SUPABASE_U
 
 ## Database
 
+### Player grading
+
+Apply `supabase/migrations/20261112000000_player_gradings.sql` before publishing the grading screen. Admins can open a player in Admin Panel, score technique, movement, consistency, and match play from 1 to 9, add assessment notes, and assign the final level. The assessment record and profile level update happen in one database transaction. Match ratings only suggest a level review; they never change the assigned level automatically. The level descriptions are starter guidance in `src/lib/skillLevels.ts`.
+
 SQL migrations are under `supabase/migrations`. Use the existing Supabase database when continuing an existing deployment. Check its applied migration history before applying pending migrations; importing source code does not execute these SQL files.
 
 The recent challenge features use:

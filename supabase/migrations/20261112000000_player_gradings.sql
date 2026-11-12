@@ -1,6 +1,6 @@
 -- Admin assessments are an audit trail. Inserting one assigns its final level
 -- in the same transaction; match ratings remain advisory only.
-CREATE TABLE public.player_gradings (
+CREATE TABLE IF NOT EXISTS public.player_gradings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   player_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   assessed_by uuid NOT NULL DEFAULT auth.uid() REFERENCES public.profiles(id),
@@ -16,16 +16,18 @@ CREATE TABLE public.player_gradings (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX player_gradings_player_created_idx
+CREATE INDEX IF NOT EXISTS player_gradings_player_created_idx
   ON public.player_gradings (player_id, created_at DESC);
 
 ALTER TABLE public.player_gradings ENABLE ROW LEVEL SECURITY;
 GRANT SELECT, INSERT ON public.player_gradings TO authenticated;
 
+DROP POLICY IF EXISTS "Players and admins can read player gradings" ON public.player_gradings;
 CREATE POLICY "Players and admins can read player gradings"
   ON public.player_gradings FOR SELECT TO authenticated
   USING (player_id = auth.uid() OR app_private.is_admin_or_super_admin());
 
+DROP POLICY IF EXISTS "Admins can assess players" ON public.player_gradings;
 CREATE POLICY "Admins can assess players"
   ON public.player_gradings FOR INSERT TO authenticated
   WITH CHECK (
@@ -33,7 +35,7 @@ CREATE POLICY "Admins can assess players"
     AND assessed_by = auth.uid()
   );
 
-CREATE FUNCTION app_private.apply_player_grading()
+CREATE OR REPLACE FUNCTION app_private.apply_player_grading()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp AS $$
 BEGIN
@@ -44,6 +46,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS apply_player_grading_after_insert ON public.player_gradings;
 CREATE TRIGGER apply_player_grading_after_insert
   AFTER INSERT ON public.player_gradings
   FOR EACH ROW EXECUTE FUNCTION app_private.apply_player_grading();
